@@ -1,0 +1,188 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+ * friday-kanban — design tokens
+ * Graphite "mission control" dark theme with an ember accent.
+ * Fonts are macOS-native on purpose (local-only tool, no build-time fetch):
+ * Avenir Next for chrome, SF Mono (ui-monospace) for everything data.
+ * ------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: "Avenir Next", "Avenir", "Helvetica Neue", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Menlo", "Cascadia Code", monospace;
+
+  /* surfaces */
+  --color-bg: #0a0b0d;
+  --color-panel: #0f1013;
+  --color-raised: #15171b;
+  --color-overlay: #1b1e23;
+  --color-hover: #20242b;
+
+  /* lines */
+  --color-edge: #23262d;
+  --color-edge-bright: #363b45;
+
+  /* text */
+  --color-ink: #e8eaef;
+  --color-mute: #99a0ac;
+  --color-faint: #5d6470;
+
+  /* accents */
+  --color-ember: #f2a33c;
+  --color-ember-dim: #b97c2a;
+  --color-ok: #46d39a;
+  --color-danger: #f25d52;
+  --color-attention: #ff8059;
+  --color-review: #a18cff;
+  --color-queue: #58b7f0;
+
+  --animate-pulse-glow: pulse-glow 1.5s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-slide-in: slide-in 0.22s cubic-bezier(0.32, 0.72, 0.36, 1) both;
+  --animate-fade-up: fade-up 0.16s ease-out both;
+  --animate-toast-in: toast-in 0.2s cubic-bezier(0.32, 0.72, 0.36, 1) both;
+  --animate-pane-up: pane-up 0.22s cubic-bezier(0.32, 0.72, 0.36, 1) both;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(242 163 60 / 0.55);
+  }
+  50% {
+    opacity: 0.65;
+    box-shadow: 0 0 0 4px rgb(242 163 60 / 0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    transform: translateY(6px) scale(0.99);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pane-up {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Base
+ * ------------------------------------------------------------------------- */
+
+html {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background:
+    radial-gradient(1200px 500px at 70% -10%, rgb(242 163 60 / 0.045), transparent 60%),
+    radial-gradient(900px 400px at 10% 110%, rgb(161 140 255 / 0.035), transparent 60%),
+    var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+::selection {
+  background: rgb(242 163 60 / 0.3);
+}
+
+/* slim scrollbars everywhere */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2c3038 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2c3038;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a3f49;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* skeleton shimmer helper */
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    var(--color-raised) 40%,
+    var(--color-overlay) 50%,
+    var(--color-raised) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* subtle dotted grid for the board background */
+.board-grid {
+  background-image: radial-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-edge-bright);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-mute);
+}

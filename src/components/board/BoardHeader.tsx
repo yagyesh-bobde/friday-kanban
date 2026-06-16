@@ -1,0 +1,107 @@
+"use client";
+
+/**
+ * Board header: brand + connection state, scheduler mode toggle + concurrency
+ * cap (PUT /api/config), Create PR menu, settings, Add Project, New Task.
+ */
+
+import { useBoard } from "@/store/board";
+import { useUi } from "@/store/ui";
+import { cn } from "@/components/util";
+import { Segmented, Stepper } from "@/components/ui/fields";
+import { IconPlus, IconSpark } from "@/components/ui/icons";
+import { CreatePrMenu } from "./CreatePrMenu";
+import { SettingsPopover } from "@/components/settings/SettingsPopover";
+
+export function BoardHeader() {
+  const config = useBoard((s) => s.config);
+  const connection = useBoard((s) => s.connection);
+  const updateConfig = useBoard((s) => s.updateConfig);
+  const projects = useBoard((s) => s.projects);
+  const openNewTask = useUi((s) => s.openNewTask);
+  const openAddProject = useUi((s) => s.openAddProject);
+
+  return (
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
+      {/* brand */}
+      <div className="flex items-center gap-2">
+        <IconSpark size={16} className="text-ember" />
+        <span className="text-[14px] font-semibold tracking-tight">friday</span>
+        <span
+          className={cn(
+            "ml-1 inline-flex items-center gap-1.5 rounded-full border px-2 py-px font-mono text-[9.5px] uppercase tracking-wider",
+            connection === "online"
+              ? "border-ok/25 text-ok"
+              : connection === "connecting"
+                ? "border-edge text-faint"
+                : "border-danger/30 text-danger",
+          )}
+          title="SSE event stream"
+        >
+          <span
+            className={cn(
+              "h-1 w-1 rounded-full",
+              connection === "online"
+                ? "bg-ok"
+                : connection === "connecting"
+                  ? "bg-faint"
+                  : "bg-danger animate-pulse-glow",
+            )}
+          />
+          {connection === "online" ? "live" : connection}
+        </span>
+      </div>
+
+      <div className="mx-1 h-5 w-px bg-edge" />
+
+      {/* scheduler */}
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-faint">
+          Scheduler
+        </span>
+        <Segmented
+          size="sm"
+          value={config.schedulerMode}
+          onChange={(mode) => void updateConfig({ schedulerMode: mode })}
+          options={[
+            { value: "manual", label: "Manual", title: "Drag Todo → In Dev to start a task" },
+            { value: "auto", label: "Auto", title: "Drain Todo up to the concurrency cap" },
+          ]}
+        />
+        {config.schedulerMode === "auto" ? (
+          <Stepper
+            label="cap"
+            value={config.maxConcurrentTasks}
+            min={1}
+            max={20}
+            onChange={(v) => void updateConfig({ maxConcurrentTasks: v })}
+          />
+        ) : null}
+      </div>
+
+      <span className="flex-1" />
+
+      <CreatePrMenu />
+      <SettingsPopover />
+
+      <div className="mx-1 h-5 w-px bg-edge" />
+
+      <button
+        onClick={openAddProject}
+        className="inline-flex items-center gap-1.5 rounded-md border border-edge px-2.5 py-1.5 text-xs font-medium text-mute transition-colors hover:border-edge-bright hover:text-ink"
+      >
+        <IconPlus size={12} />
+        Add project
+      </button>
+      <button
+        onClick={() => openNewTask()}
+        disabled={projects.length === 0}
+        className="inline-flex items-center gap-1.5 rounded-md bg-ember px-3 py-1.5 text-xs font-semibold text-[#1a1206] shadow-[0_0_16px_rgba(242,163,60,0.18)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+        title={projects.length === 0 ? "Add a project first" : "Create a task"}
+      >
+        <IconPlus size={12} />
+        New task
+      </button>
+    </header>
+  );
+}
