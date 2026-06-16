@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import type { Task } from "@/lib/types";
 import { updateTask } from "@/server/db/tasks";
+import { listTaskAttachments } from "@/server/attachments";
 import { runClaude } from "@/server/agents/claudeRunner";
 import {
   branchExists,
@@ -54,6 +55,14 @@ function buildStartPrompt(task: Task): string {
       "",
       "Relevant files/directories for context (paths relative to the repo root):",
       ...task.contextPaths.map((p) => `- ${p}`),
+    );
+  }
+  const attachments = listTaskAttachments(task.id);
+  if (attachments.length > 0) {
+    parts.push(
+      "",
+      "Image attachments for this task — read each with the Read tool (absolute paths):",
+      ...attachments.map((p) => `- ${p}`),
     );
   }
   parts.push(

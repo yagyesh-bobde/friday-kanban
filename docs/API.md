@@ -88,9 +88,12 @@ when `schedulerMode === 'auto'`). With `startNow: true` the implementer is start
 on demand immediately (Todo → In Dev, same admission path as a manual drag),
 regardless of scheduler mode — the returned `Task` reflects the started state.
 
-- Body: `CreateTaskInput = { projectId; title; prompt; contextPaths?; branch?; workspaceMode?; execution?; modelOverrides?; startNow? }`
+- Body: `CreateTaskInput = { projectId; title; prompt; contextPaths?; images?; branch?; workspaceMode?; execution?; modelOverrides?; startNow? }`
   - `branch` defaults to the project's `baseBranch`; `workspaceMode` defaults to `'branch'`;
     `execution` defaults to the project's `defaultExecution`; `startNow` defaults to `false`.
+  - `images?: { name; dataUrl }[]` — up to 6 base64 image data URLs (PNG/JPG/GIF/WebP,
+    ≤10 MB each). Saved under `~/.friday-kanban/attachments/<taskId>/` and referenced by
+    absolute path in the local implementer prompt (ignored for `execution: 'cloud'`).
 - Response `201`: `Task`
 - Errors: `400`, `404` (unknown `projectId`), `501`
 

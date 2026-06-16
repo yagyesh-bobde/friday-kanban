@@ -28,6 +28,7 @@ import {
   markStaleRunningTasksAsError,
 } from "@/server/db/tasks";
 import { getConfig } from "@/server/db/config";
+import { saveTaskAttachments } from "@/server/attachments";
 import { publish } from "@/server/bus";
 import {
   InvalidTransitionError,
@@ -109,6 +110,13 @@ export class Orchestrator {
       execution: input.execution ?? project.defaultExecution,
       modelOverrides: input.modelOverrides,
     });
+
+    // Persist any prompt image attachments to disk (referenced by absolute
+    // path in the implementer prompt). Done after the task exists so the files
+    // land under the task's directory.
+    if (input.images && input.images.length > 0) {
+      saveTaskAttachments(task.id, input.images);
+    }
 
     publish({ type: "task_created", task });
     publish({ type: "task_event_appended", taskId: task.id, event });

@@ -25,6 +25,25 @@ export const DB_FILENAME = "friday.db";
 export const WORKTREES_DIRNAME = "worktrees";
 export const TRANSCRIPTS_DIRNAME = "transcripts";
 export const LOGS_DIRNAME = "logs";
+export const ATTACHMENTS_DIRNAME = "attachments";
+
+// ---------------------------------------------------------------------------
+// Prompt image attachments
+// ---------------------------------------------------------------------------
+
+/** Image mime types accepted as task prompt attachments → file extension. */
+export const ATTACHMENT_MIME_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+
+/** Max images attachable to a single task prompt. */
+export const MAX_ATTACHMENTS = 6;
+
+/** Max decoded size per attachment (10 MiB). */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Board

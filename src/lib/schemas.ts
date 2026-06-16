@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { MAX_ATTACHMENTS } from "./constants";
 import type {
   AgentRun,
   AppConfig,
@@ -23,6 +24,7 @@ import type {
   ReviewVerdict,
   Task,
   TaskEvent,
+  TaskImageInput,
   UpdateConfigInput,
 } from "./types";
 
@@ -205,11 +207,18 @@ export const createProjectInputSchema = z.object({
   defaultExecution: executionSchema.optional(),
 }) satisfies z.ZodType<CreateProjectInput>;
 
+export const taskImageInputSchema = z.object({
+  name: z.string().min(1),
+  // data:image/<type>;base64,<payload> — content type/size enforced on decode.
+  dataUrl: z.string().regex(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "must be a base64 image data URL"),
+}) satisfies z.ZodType<TaskImageInput>;
+
 export const createTaskInputSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().min(1),
   prompt: z.string().min(1),
   contextPaths: z.array(z.string()).optional(),
+  images: z.array(taskImageInputSchema).max(MAX_ATTACHMENTS).optional(),
   branch: z.string().min(1).optional(),
   workspaceMode: workspaceModeSchema.optional(),
   execution: executionSchema.optional(),

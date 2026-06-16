@@ -141,6 +141,14 @@ export const IconFile = (p: IconProps) => (
   </svg>
 );
 
+export const IconImage = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4.5" width="18" height="15" rx="1.5" />
+    <circle cx="8.5" cy="9.5" r="1.6" />
+    <path d="m4 17 5-5 4 4 3-3 4 4" />
+  </svg>
+);
+
 export const IconFolder = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h4.5l2 2.5H19a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5v-11Z" />

@@ -7,25 +7,47 @@
  * model overrides (collapsed under "Models", prefilled from column defaults).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentColumn,
   CreateTaskInput,
   Execution,
   ModelSpec,
+  TaskImageInput,
   WorkspaceMode,
 } from "@/lib/types";
+import {
+  ATTACHMENT_MIME_EXT,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+} from "@/lib/constants";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
 import { api, ApiHttpError } from "@/store/api";
 import { Modal } from "@/components/ui/Modal";
 import { Button, Field, Input, Segmented, Select, Textarea } from "@/components/ui/fields";
 import { ChipsInput } from "@/components/ui/ChipsInput";
-import { IconChevronDown, IconChevronRight, Spinner } from "@/components/ui/icons";
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconImage,
+  IconX,
+  Spinner,
+} from "@/components/ui/icons";
 import { ModelSpecEditor } from "@/components/settings/SettingsPopover";
 import { cn } from "@/components/util";
 
 const NEW_BRANCH = "__new__";
+
+/** Read a File into a `data:<mime>;base64,...` URL via FileReader. */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 const WORKSPACE_OPTIONS: { value: WorkspaceMode; label: string; hint: string }[] = [
   {
@@ -62,6 +84,8 @@ export function NewTaskModal() {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [contextPaths, setContextPaths] = useState<string[]>([]);
+  const [images, setImages] = useState<TaskImageInput[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [branchChoice, setBranchChoice] = useState<string>("");
   const [newBranchName, setNewBranchName] = useState("");
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("branch");
@@ -86,6 +110,7 @@ export function NewTaskModal() {
     setTitle("");
     setPrompt("");
     setContextPaths([]);
+    setImages([]);
     setNewBranchName("");
     setWorkspaceMode("branch");
     setModelsOpen(false);
@@ -125,6 +150,32 @@ export function NewTaskModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id]);
 
+  const addFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const room = MAX_ATTACHMENTS - images.length;
+    if (room <= 0) {
+      toast("error", "Too many images", `Up to ${MAX_ATTACHMENTS} images per task.`);
+      return;
+    }
+    const accepted: TaskImageInput[] = [];
+    for (const file of Array.from(files).slice(0, room)) {
+      if (!(file.type in ATTACHMENT_MIME_EXT)) {
+        toast("error", "Unsupported image", `${file.name}: ${file.type || "unknown type"}`);
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast("error", "Image too large", `${file.name} exceeds 10 MB.`);
+        continue;
+      }
+      try {
+        accepted.push({ name: file.name, dataUrl: await fileToDataUrl(file) });
+      } catch {
+        toast("error", "Could not read image", file.name);
+      }
+    }
+    if (accepted.length > 0) setImages((prev) => [...prev, ...accepted]);
+  };
+
   const effectiveBranch =
     branchChoice === NEW_BRANCH ? newBranchName.trim() : branchChoice;
   const canSubmit =
@@ -146,6 +197,7 @@ export function NewTaskModal() {
       title: title.trim(),
       prompt: prompt.trim(),
       ...(contextPaths.length > 0 ? { contextPaths } : {}),
+      ...(images.length > 0 ? { images } : {}),
       branch: effectiveBranch,
       workspaceMode,
       execution,
@@ -302,6 +354,65 @@ export function NewTaskModal() {
             onChange={setContextPaths}
             placeholder="src/lib/auth.ts, docs/spec.md …"
           />
+        </Field>
+
+        {/* image attachments */}
+        <Field
+          label="Images"
+          hint={
+            execution === "cloud"
+              ? "local execution only — ignored on cloud runs"
+              : `optional · up to ${MAX_ATTACHMENTS} · PNG/JPG/GIF/WebP`
+          }
+        >
+          <div className="space-y-2">
+            {images.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {images.map((img, i) => (
+                  <div
+                    key={`${img.name}-${i}`}
+                    className="group relative h-16 w-16 overflow-hidden rounded-md border border-edge bg-raised"
+                    title={img.name}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.dataUrl}
+                      alt={img.name}
+                      className="h-full w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                      className="absolute right-0.5 top-0.5 rounded bg-overlay/90 p-0.5 text-mute opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+                      aria-label={`Remove ${img.name}`}
+                    >
+                      <IconX size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={images.length >= MAX_ATTACHMENTS}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <IconImage size={14} />
+              {images.length === 0 ? "Attach images" : "Add more"}
+            </Button>
+          </div>
         </Field>
 
         {/* workspace + execution */}

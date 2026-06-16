@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import {
+  ATTACHMENTS_DIRNAME,
   DB_FILENAME,
   FRIDAY_HOME_DIRNAME,
   LOGS_DIRNAME,
@@ -32,6 +33,12 @@ export function transcriptsDir(taskId?: string): string {
   return taskId ? path.join(base, taskId) : base;
 }
 
+/** Per-task directory holding prompt image attachments saved at create time. */
+export function attachmentsDir(taskId?: string): string {
+  const base = path.join(fridayHome(), ATTACHMENTS_DIRNAME);
+  return taskId ? path.join(base, taskId) : base;
+}
+
 export function logsDir(): string {
   return path.join(fridayHome(), LOGS_DIRNAME);
 }
@@ -47,5 +54,6 @@ export function ensureRuntimeDirs(): void {
   ensureDir(fridayHome());
   ensureDir(worktreesDir());
   ensureDir(transcriptsDir());
+  ensureDir(attachmentsDir());
   ensureDir(logsDir());
 }

@@ -298,11 +298,25 @@ export interface CreateProjectInput {
   defaultExecution?: Execution; // default 'local'
 }
 
+/**
+ * One image attached to a task prompt. Transient transport shape only — sent
+ * with CreateTaskInput, decoded server-side and written to disk under
+ * ~/.friday-kanban/attachments/<taskId>/; never stored on the Task row.
+ */
+export interface TaskImageInput {
+  /** Original filename (used to derive the saved file's name). */
+  name: string;
+  /** `data:image/<type>;base64,<...>` URL produced by the browser FileReader. */
+  dataUrl: string;
+}
+
 export interface CreateTaskInput {
   projectId: string;
   title: string;
   prompt: string;
   contextPaths?: string[];
+  /** Prompt image attachments (local execution only — read by the agent's Read tool). */
+  images?: TaskImageInput[];
   branch?: string; // default: project.baseBranch
   workspaceMode?: WorkspaceMode; // default 'branch'
   execution?: Execution; // default: project.defaultExecution
