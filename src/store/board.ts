@@ -48,6 +48,7 @@ interface BoardStore {
 
   moveTask: (taskId: string, to: Column, comment?: string) => Promise<boolean>;
   retryTask: (taskId: string) => Promise<void>;
+  sendMessage: (taskId: string, message: string) => Promise<boolean>;
   cancelTask: (taskId: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<boolean>;
   createTask: (input: CreateTaskInput) => Promise<Task>;
@@ -224,6 +225,18 @@ export const useBoard = create<BoardStore>()((set, get) => ({
       useUi.getState().toast("info", "Retrying task");
     } catch (err) {
       toastError("Retry failed", err);
+    }
+  },
+
+  sendMessage: async (taskId, message) => {
+    try {
+      const updated = await api.sendMessage(taskId, message);
+      set((s) => ({ tasks: { ...s.tasks, [updated.id]: updated } }));
+      useUi.getState().toast("info", "Message sent — resuming task");
+      return true;
+    } catch (err) {
+      toastError("Send failed", err);
+      return false;
     }
   },
 

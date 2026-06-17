@@ -243,4 +243,8 @@ export const moveTaskInputSchema = z.object({
   comment: z.string().optional(),
 }) satisfies z.ZodType<MoveTaskInput>;
 
+export const sendMessageInputSchema = z.object({
+  message: z.string().min(1),
+});
+
 export const updateConfigInputSchema = appConfigSchema.partial() satisfies z.ZodType<UpdateConfigInput>;

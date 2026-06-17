@@ -31,6 +31,11 @@ export interface ImplementOptions {
   mode: "start" | "fix";
   /** Findings/comment markdown injected into the fix prompt (mode 'fix'). */
   feedbackMarkdown?: string;
+  /**
+   * The feedback is a free-form user message (drawer composer), not reviewer
+   * findings — frame the fix prompt as a user instruction.
+   */
+  humanDirective?: boolean;
 }
 
 export interface ImplementOutcome {
@@ -74,14 +79,19 @@ function buildStartPrompt(task: Task): string {
   return parts.join("\n");
 }
 
-function buildFixPrompt(feedbackMarkdown: string): string {
-  return [
-    "A code reviewer examined your changes for this task and requested changes.",
-    "Address each blocking item below, then commit your fixes with a clear commit message",
-    "(do NOT push, do NOT open a pull request). Finish with a short summary of what you changed.",
-    "",
-    feedbackMarkdown.trim(),
-  ].join("\n");
+function buildFixPrompt(feedbackMarkdown: string, humanDirective: boolean): string {
+  const intro = humanDirective
+    ? [
+        "The user sent a message about this task while it was stopped. Follow their",
+        "instructions below, then commit your changes with a clear commit message",
+        "(do NOT push, do NOT open a pull request). Finish with a short summary of what you changed.",
+      ]
+    : [
+        "A code reviewer examined your changes for this task and requested changes.",
+        "Address each blocking item below, then commit your fixes with a clear commit message",
+        "(do NOT push, do NOT open a pull request). Finish with a short summary of what you changed.",
+      ];
+  return [...intro, "", feedbackMarkdown.trim()].join("\n");
 }
 
 /** Build the markdown fed into the fix round from a codex verdict. */
@@ -187,7 +197,7 @@ export async function runImplementerPhase(
 
   const prompt =
     isFix && opts.feedbackMarkdown !== undefined
-      ? buildFixPrompt(opts.feedbackMarkdown)
+      ? buildFixPrompt(opts.feedbackMarkdown, opts.humanDirective === true)
       : buildStartPrompt(task);
 
   const result = await runClaude({

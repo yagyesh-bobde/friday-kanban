@@ -14,8 +14,12 @@ import { wasCanceled } from "./processRegistry";
 export type PipelineEntry =
   /** Fresh Todo -> In Dev start. */
   | { kind: "implement" }
-  /** Resume the session with feedback (human send-back or retry-with-context). */
-  | { kind: "fix"; feedbackMarkdown: string }
+  /**
+   * Resume the session with feedback. `humanDirective` distinguishes a
+   * free-form user message (sent via the drawer composer) from reviewer
+   * findings, so the implementer prompt frames it correctly.
+   */
+  | { kind: "fix"; feedbackMarkdown: string; humanDirective?: boolean }
   /**
    * Jump straight to review (forced-review drag, or retry in In Review).
    * `commitOutstanding` (set by the In Dev -> In Review drag) commits any
@@ -48,7 +52,11 @@ export async function runTaskPipeline(taskId: string, entry: PipelineEntry): Pro
       const outcome = await runImplementerPhase(
         taskId,
         next.kind === "fix"
-          ? { mode: "fix", feedbackMarkdown: next.feedbackMarkdown }
+          ? {
+              mode: "fix",
+              feedbackMarkdown: next.feedbackMarkdown,
+              humanDirective: next.humanDirective,
+            }
           : { mode: "start" },
       );
       if (!outcome.ok) return; // dev_failed / canceled — recorded already

@@ -101,6 +101,8 @@ export const api = {
     ),
   retryTask: (taskId: string) =>
     request<Task>(`/api/tasks/${taskId}/retry`, { method: "POST" }),
+  sendMessage: (taskId: string, message: string) =>
+    request<Task>(`/api/tasks/${taskId}/message`, post({ message })),
   /**
    * NOTE: cancel is referenced by DESIGN/orchestrator (cancelTask) but is not
    * in docs/API.md's route list yet — the api agent must expose this route.

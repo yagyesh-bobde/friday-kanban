@@ -237,6 +237,59 @@ export class Orchestrator {
   }
 
   /**
+   * Resume a stopped task (runState 'error' or 'needs_attention') with a
+   * free-form user message instead of a blind retry: the message is handed to
+   * the implementer as a directive ("the user says: ...") in the resumed
+   * session. Mirrors retryTask's branching by the column it stopped in.
+   */
+  async resumeWithMessage(taskId: string, message: string): Promise<Task> {
+    const task = requireTask(taskId);
+    if (task.runState !== "error" && task.runState !== "needs_attention") {
+      throw new InvalidTransitionError(
+        `sending a message requires runState 'error' or 'needs_attention' (got '${task.runState}')`,
+      );
+    }
+    const trimmed = message.trim();
+    if (trimmed.length === 0) {
+      throw new InvalidTransitionError("a message is required");
+    }
+
+    clearCanceled(taskId);
+    // needs_attention has burned the review-cycle budget — hand it a fresh one
+    // (same reasoning as retryTask).
+    const resetCycle = task.runState === "needs_attention";
+    const clearError = resetCycle
+      ? { error: undefined, reviewCycle: 0 }
+      : { error: undefined };
+    const feedbackMarkdown = ["**The user sent a message to direct this task:**", "", trimmed].join(
+      "\n",
+    );
+
+    if (task.column === "in_review") {
+      // Move back to In Dev for a fix round that addresses the user's message
+      // (review_changes_requested is legal from in_review/error|needs_attention).
+      transition(taskId, "review_changes_requested", {
+        payload: { source: "human", message: trimmed, viaMessage: true },
+        update: clearError,
+      });
+      getScheduler().enqueue(taskId, { kind: "fix", feedbackMarkdown, humanDirective: true });
+    } else {
+      transition(taskId, "task_retried", {
+        payload: { fromColumn: task.column, fromRunState: task.runState, resetCycle, viaMessage: true },
+        update: clearError,
+      });
+      if (task.claudeSessionId) {
+        // Resume the existing session with the user's directive.
+        getScheduler().enqueue(taskId, { kind: "fix", feedbackMarkdown, humanDirective: true });
+      } else {
+        // No session to resume (never started) — start fresh.
+        getScheduler().enqueue(taskId, { kind: "implement" });
+      }
+    }
+    return requireTask(taskId);
+  }
+
+  /**
    * Kill any live agent process for the task, release its queue slot, and mark
    * it idle in its current column (event: task_canceled).
    */

@@ -24,7 +24,7 @@ import {
   timeAgo,
 } from "@/components/util";
 import { COLUMN_LABELS } from "@/lib/constants";
-import { Button } from "@/components/ui/fields";
+import { Button, Textarea } from "@/components/ui/fields";
 import {
   IconAlert,
   IconArrowLeft,
@@ -86,6 +86,7 @@ export function TaskDrawer() {
   );
   const config = useBoard((s) => s.config);
   const retryTask = useBoard((s) => s.retryTask);
+  const sendMessage = useBoard((s) => s.sendMessage);
   const cancelTask = useBoard((s) => s.cancelTask);
   const deleteTask = useBoard((s) => s.deleteTask);
 
@@ -93,6 +94,8 @@ export function TaskDrawer() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("transcript");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
 
   // reset per task
   useEffect(() => {
@@ -100,6 +103,8 @@ export function TaskDrawer() {
     setDetailError(null);
     setTab("transcript");
     setConfirmDelete(false);
+    setMessage("");
+    setSending(false);
   }, [taskId]);
 
   // fetch + refetch on task row updates (SSE keeps updatedAt fresh)
@@ -138,6 +143,16 @@ export function TaskDrawer() {
   const spec = task ? resolveSpec(task, config, activeAgentColumn(task.column)) : null;
   const isLive = task?.runState === "running" || task?.runState === "queued";
   const verdictCount = detail?.verdicts.length ?? 0;
+  const canMessage =
+    task?.runState === "error" || task?.runState === "needs_attention";
+
+  const submitMessage = async () => {
+    if (!task || message.trim() === "" || sending) return;
+    setSending(true);
+    const ok = await sendMessage(task.id, message.trim());
+    setSending(false);
+    if (ok) setMessage("");
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-40">
@@ -318,6 +333,36 @@ export function TaskDrawer() {
                   )
                 ) : null}
               </div>
+
+              {/* mid-task message composer — direct the agent on a stopped task */}
+              {canMessage ? (
+                <div className="mt-3 rounded-md border border-edge bg-base/40 p-2">
+                  <Textarea
+                    rows={2}
+                    placeholder="Send a message into this task's session — tell the agent what to do, then it resumes. (⌘↵)"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submitMessage();
+                    }}
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-faint">
+                      Resumes the agent{" "}
+                      {task.column === "in_review" ? "in a fix round" : "in the same session"} with
+                      your instructions.
+                    </span>
+                    <Button
+                      variant="primary"
+                      disabled={message.trim() === ""}
+                      loading={sending}
+                      onClick={() => void submitMessage()}
+                    >
+                      Send message
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </header>
 
             {/* prompt (collapsed preview) */}
