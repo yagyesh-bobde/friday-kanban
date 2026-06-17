@@ -136,6 +136,19 @@ Retry a task whose `runState` is `'error'` or `'needs_attention'`. Delegates to
 - Response `200`: `Task`
 - Errors: `404`, `409` (`invalid_transition` — task not in a retryable state), `501`
 
+### POST /api/tasks/[id]/message
+
+Resume a task whose `runState` is `'error'` or `'needs_attention'` with a
+free-form user message, handed to the agent as a directive (instead of a blind
+retry). An `in_review` task moves back to In Dev for a fix round; an `in_dev`
+task resumes its existing Claude session. Delegates to
+`orchestrator.resumeWithMessage(id, message)`.
+
+- Body: `{ message: string }` (non-empty)
+- Response `200`: `Task`
+- Errors: `400` (`invalid_input` — empty/missing message), `404`, `409`
+  (`invalid_transition` — task not in `error`/`needs_attention`)
+
 ### POST /api/tasks/[id]/cancel
 
 Cancel a task whose `runState` is `'running'` or `'queued'`: kills any live
