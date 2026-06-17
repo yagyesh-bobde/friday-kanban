@@ -5,34 +5,46 @@ coding agents through it automatically:
 
 ```
 Todo ──▶ In Dev ──▶ In Review ──▶ Done ───▶ (manual) Create PR
-        Claude Code      Codex CLI      commits on
-        implements       reviews        the branch
-                              │
-                              └─ blocker found → back to In Dev (same Claude session, with the findings)
+        Claude Code     Claude Code     commits on
+        implements      reviews         the branch
+                             │
+                             └─ blocker found → back to In Dev (same Claude session, with the findings)
 ```
 
+![friday-kanban board](docs/screenshots/board.png)
+
 - **In Dev** is implemented by Claude Code (default: latest Opus, high effort).
-- **In Review** is reviewed by Codex (default: latest model, medium reasoning effort).
+- **In Review** is reviewed by Claude Code (Haiku, medium effort) for local tasks; cloud tasks are
+  reviewed by the Codex CLI.
 - If the reviewer flags a **bug or security** issue, the card bounces back to In Dev and the
   *same* Claude session is resumed with the findings. Style/nitpick comments never block.
 - The loop is capped at **3 rounds**; if still blocked, the card goes to **Needs attention**.
+- A stopped card (error / needs-attention) can be **retried**, or you can **send it a message** —
+  free-form instructions handed to the agent in its existing session to steer the next run.
 - **Done** means the task passed review and its commits are on the branch — there is **no PR per
   task**. A manual **Create PR** action per project bundles all done-task commits into one PR.
 
 Tasks can run **locally** or in the **cloud** (`claude --remote`). See `DESIGN.md` for the full
 list of locked design decisions and `docs/research/` for the research the design is based on.
 
+Open a card to follow the live agent transcript, review rounds, findings, commits, and cost — and
+to retry or message a stopped task:
+
+![Task drawer](docs/screenshots/task-drawer.png)
+
 ## Prerequisites
 
 - **Node.js 22+**
 - **`claude`** (Claude Code CLI) — installed and authenticated (`claude` runs without prompting).
-- **`codex`** (OpenAI Codex CLI) — installed and authenticated, used as the reviewer.
+  Used for both the implementer and the local reviewer.
+- **`codex`** (OpenAI Codex CLI) — optional; only required if you run **cloud** tasks, which use it
+  as the reviewer.
 - **`gh`** (GitHub CLI) — installed and authenticated, used to open PRs.
 - **`git`** on PATH.
 
-All three agent CLIs are invoked as child processes from your PATH. Local tasks run with
-permissions skipped (`claude --dangerously-skip-permissions`, codex `approval_policy=never`), so
-point friday-kanban at repositories you trust — git history is your undo.
+The agent CLIs are invoked as child processes from your PATH. Local tasks run with permissions
+skipped (`claude --dangerously-skip-permissions`), so point friday-kanban at repositories you
+trust — git history is your undo.
 
 ## Run
 
@@ -49,14 +61,16 @@ Open **http://localhost:4517**.
 
 1. **Add Project** — give it a name and the local repo path. The base branch is auto-detected.
 2. **New Task** — pick the project and branch (or create a new branch), write the prompt, attach
-   any extra context paths, choose the workspace mode (work on the branch directly, in a git
-   worktree, or on a fresh branch), pick local vs cloud, and optionally override the per-stage
+   any extra context paths or images, choose the workspace mode (work on the branch directly, in a
+   git worktree, or on a fresh branch), pick local vs cloud, and optionally override the per-stage
    models/effort (prefilled from the column defaults).
 3. **Start it** — drag the card from Todo → In Dev (manual mode), or flip the header toggle to
    **auto** and friday drains the Todo column itself, up to the concurrency cap (default 5).
 4. Watch the live agent transcript by opening the card. Review rounds, findings, commits, and
    cost are all shown there.
-5. When tasks are Done, use **Create PR** for the project to open a single bundled PR.
+5. If a card stops on an **error** or **needs-attention**, open it and either **Retry**, or type a
+   message in the composer and **Send** — the agent resumes its session with your instructions.
+6. When tasks are Done, use **Create PR** for the project to open a single bundled PR.
 
 Dragging a card **is a command**: Todo→In Dev starts the implementer, In Dev→In Review forces a
 review, In Review→In Dev sends it back with a comment. Illegal moves are rejected.
