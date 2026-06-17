@@ -10,7 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentRunUsage, ModelSpec, TranscriptItem } from "@/lib/types";
+import type { AgentRole, AgentRunUsage, ModelSpec, TranscriptItem } from "@/lib/types";
 import { publish } from "@/server/bus";
 import {
   createAgentRun,
@@ -34,6 +34,8 @@ export interface ClaudeRunParams {
   /** Pre-allocated UUID: --session-id on first run, --resume on fix rounds. */
   sessionId: string;
   mode: "start" | "resume";
+  /** Run role recorded on the agent run; defaults to "implementer". */
+  role?: AgentRole;
   reviewCycle?: number;
   hardTimeoutMs?: number;
   stallTimeoutMs?: number;
@@ -102,7 +104,7 @@ export async function runClaude(params: ClaudeRunParams): Promise<ClaudeRunResul
   const dir = ensureDir(transcriptsDir());
   const run = createAgentRun({
     taskId: params.taskId,
-    role: "implementer",
+    role: params.role ?? "implementer",
     spec: params.spec,
     argv,
     transcriptPath: "", // patched right below, once the run id is known
@@ -160,13 +162,14 @@ export async function runClaude(params: ClaudeRunParams): Promise<ClaudeRunResul
   const final = captured.result;
   const isError = final === null ? true : final.isError;
 
+  const noun = params.role ?? "implementer";
   let failureReason: string | undefined;
   if (exit.endReason === "stall") {
-    failureReason = "implementer stalled (no stdout for the watchdog window)";
+    failureReason = `${noun} stalled (no stdout for the watchdog window)`;
   } else if (exit.endReason === "timeout") {
-    failureReason = "implementer exceeded the hard time limit";
+    failureReason = `${noun} exceeded the hard time limit`;
   } else if (exit.endReason === "killed") {
-    failureReason = "implementer was canceled";
+    failureReason = `${noun} was canceled`;
   } else if (exit.endReason === "spawn_error") {
     failureReason = `failed to spawn claude: ${exit.stderrTail.trim() || "unknown spawn error"}`;
   } else if (final === null) {
@@ -188,7 +191,7 @@ export async function runClaude(params: ClaudeRunParams): Promise<ClaudeRunResul
     emitItem({
       kind: "error",
       ts: new Date().toISOString(),
-      message: failureReason ?? "implementer run failed",
+      message: failureReason ?? `${noun} run failed`,
     });
   }
 

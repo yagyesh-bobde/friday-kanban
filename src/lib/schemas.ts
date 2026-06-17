@@ -133,7 +133,13 @@ export const taskEventSchema = z.object({
 
 export const reviewFindingSchema = z.object({
   file: z.string(),
-  line: z.number().int().optional(),
+  // codex emits `line: null` (nullable in the strict output schema) when the
+  // finding isn't tied to a line; normalize to undefined for consumers.
+  line: z
+    .number()
+    .int()
+    .nullish()
+    .transform((v) => v ?? undefined),
   severity: findingSeveritySchema,
   comment: z.string(),
 }) satisfies z.ZodType<ReviewFinding>;

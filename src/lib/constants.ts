@@ -123,10 +123,13 @@ export const REVIEW_VERDICT_JSON_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["file", "severity", "comment"],
+        // OpenAI strict structured outputs require EVERY key in `properties` to
+        // appear in `required`; genuinely-optional fields are expressed as
+        // nullable instead (model emits null when there's no line).
+        required: ["file", "line", "severity", "comment"],
         properties: {
           file: { type: "string" },
-          line: { type: "number" },
+          line: { type: ["number", "null"] },
           severity: { type: "string", enum: ["blocker", "major", "minor"] },
           comment: { type: "string" },
         },

@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AgentRunUsage, ModelSpec, ReviewVerdict, TranscriptItem } from "@/lib/types";
 import { EFFORT_TO_CODEX, REVIEW_VERDICT_JSON_SCHEMA } from "@/lib/constants";
-import { reviewVerdictSchema } from "@/lib/schemas";
+import { parseVerdict } from "./verdict";
 import { publish } from "@/server/bus";
 import {
   createAgentRun,
@@ -79,12 +79,14 @@ function buildCodexArgv(params: CodexRunParams, outFile: string): string[] {
   if (params.resumeThreadId) {
     argv.push("resume", params.resumeThreadId);
   }
+  argv.push("--json");
+  // `codex exec resume` accepts neither -C nor -s — it inherits the cwd and
+  // sandbox of the original session. Only the fresh run sets them explicitly
+  // (the spawned process cwd is params.cwd either way).
+  if (!params.resumeThreadId) {
+    argv.push("-C", params.cwd, "-s", "read-only");
+  }
   argv.push(
-    "--json",
-    "-C",
-    params.cwd,
-    "-s",
-    "read-only",
     "-c",
     'approval_policy="never"',
     "-m",
@@ -118,28 +120,7 @@ function readVerdictFile(outFile: string): { verdict?: ReviewVerdict; error?: st
   } catch {
     return { error: "codex did not write the verdict outfile" };
   }
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return { error: "codex verdict outfile is empty" };
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    // Sometimes the final message wraps JSON in a code fence — try to salvage.
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (!match) return { error: "codex verdict outfile is not JSON" };
-    try {
-      parsed = JSON.parse(match[0]);
-    } catch {
-      return { error: "codex verdict outfile is not JSON" };
-    }
-  }
-
-  const result = reviewVerdictSchema.safeParse(parsed);
-  if (!result.success) {
-    return { error: `codex verdict failed schema validation: ${result.error.message.slice(0, 500)}` };
-  }
-  return { verdict: result.data };
+  return parseVerdict(raw);
 }
 
 /** Run one codex reviewer invocation to completion. */

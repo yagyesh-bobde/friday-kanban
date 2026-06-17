@@ -8,12 +8,12 @@
 
 import type { ReviewVerdict, Task } from "@/lib/types";
 import { getConfig } from "@/server/db/config";
-import { ensureVerdictSchemaFile, runCodex } from "@/server/agents/codexRunner";
+import { REVIEW_SPEC, runClaudeReviewer } from "@/server/agents/claudeReviewer";
 import { commitAll, headSha, showCommit } from "@/server/git";
 import { notify } from "@/server/notify";
 import { wasCanceled } from "./processRegistry";
 import { requireTask, transition } from "./stateMachine";
-import { requireProject, resolveModelSpec, workspaceDir } from "./common";
+import { requireProject, workspaceDir } from "./common";
 
 const DIFF_CHAR_BUDGET = 160_000;
 
@@ -90,7 +90,7 @@ export function buildReviewPrompt(task: Task, diff: string, round: number): stri
     "  drive a 'request_changes' verdict on their own.",
     "- If there are no blockers, the verdict is 'approve' (still report major/minor findings).",
     "- Your final message MUST be a single JSON object matching the provided output schema:",
-    '  {"verdict":"approve"|"request_changes","summary":string,"findings":[{"file","line"?,"severity":"blocker"|"major"|"minor","comment"}]}',
+    '  {"verdict":"approve"|"request_changes","summary":string,"findings":[{"file":string,"line":number|null,"severity":"blocker"|"major"|"minor","comment":string}]}',
   ].join("\n");
 }
 
@@ -151,44 +151,34 @@ export async function runReviewPhase(taskId: string): Promise<ReviewOutcome> {
 
   const round = task.reviewCycle;
   const diff = await buildTaskDiff(task, cwd).catch(() => "");
-  const spec = resolveModelSpec(task, "in_review");
 
   task = transition(taskId, "review_started", {
-    payload: { spec, round },
+    payload: { spec: REVIEW_SPEC, round },
     update: { error: undefined },
   });
 
-  const schemaPath = ensureVerdictSchemaFile();
-  const resumeThreadId = task.codexThreadId;
-
-  const result = await runCodex({
+  const review = await runClaudeReviewer({
     taskId,
     prompt: buildReviewPrompt(task, diff, round),
     cwd,
-    spec,
-    resumeThreadId,
     reviewCycle: round,
-    outputSchemaPath: schemaPath,
   });
 
   if (wasCanceled(taskId)) {
     return { kind: "canceled" };
   }
 
-  // Persist the captured thread id for round 2+ resume regardless of outcome.
-  const threadId = result.threadId ?? resumeThreadId;
-
-  if (!result.verdict) {
-    const message = result.failureReason ?? "review run failed";
+  if (!review.verdict) {
+    const message = review.failureReason ?? "review run failed";
     transition(taskId, "review_failed", {
-      payload: { runId: result.runId, message, exitCode: result.exitCode },
-      update: { error: message, codexThreadId: threadId },
+      payload: { runId: review.runId, message },
+      update: { error: message },
     });
     notify("friday-kanban: review failed", `${task.title}: ${message.slice(0, 180)}`, taskId);
     return { kind: "failed" };
   }
 
-  const verdict = result.verdict;
+  const verdict = review.verdict;
   const blockers = verdict.findings.filter((f) => f.severity === "blocker");
   const approved = verdict.verdict === "approve" || blockers.length === 0;
 
@@ -196,8 +186,8 @@ export async function runReviewPhase(taskId: string): Promise<ReviewOutcome> {
     transition(taskId, "review_approved", {
       // Non-blocking findings live in this payload — surfaced on the card and
       // included in the eventual PR body.
-      payload: { runId: result.runId, verdict },
-      update: { codexThreadId: threadId, reviewCycle: round + 1, error: undefined },
+      payload: { runId: review.runId, verdict, source: "claude-haiku" },
+      update: { reviewCycle: round + 1, error: undefined },
     });
     notify("friday-kanban: task done", `${task.title} passed review`, taskId);
     return { kind: "approved", verdict };
@@ -206,8 +196,8 @@ export async function runReviewPhase(taskId: string): Promise<ReviewOutcome> {
   const newCycle = round + 1;
   if (newCycle >= config.maxReviewCycles) {
     transition(taskId, "review_cap_exhausted", {
-      payload: { runId: result.runId, verdict, rounds: newCycle },
-      update: { codexThreadId: threadId, reviewCycle: newCycle },
+      payload: { runId: review.runId, verdict, rounds: newCycle, source: "claude-haiku" },
+      update: { reviewCycle: newCycle },
     });
     notify(
       "friday-kanban: needs attention",
@@ -218,8 +208,8 @@ export async function runReviewPhase(taskId: string): Promise<ReviewOutcome> {
   }
 
   transition(taskId, "review_changes_requested", {
-    payload: { runId: result.runId, verdict, source: "codex" },
-    update: { codexThreadId: threadId, reviewCycle: newCycle },
+    payload: { runId: review.runId, verdict, source: "claude-haiku" },
+    update: { reviewCycle: newCycle },
   });
   return { kind: "changes_requested", verdict };
 }
