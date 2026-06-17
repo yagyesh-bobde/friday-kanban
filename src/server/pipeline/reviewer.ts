@@ -91,6 +91,9 @@ export function buildReviewPrompt(task: Task, diff: string, round: number): stri
     "- If there are no blockers, the verdict is 'approve' (still report major/minor findings).",
     "- Your final message MUST be a single JSON object matching the provided output schema:",
     '  {"verdict":"approve"|"request_changes","summary":string,"findings":[{"file":string,"line":number|null,"severity":"blocker"|"major"|"minor","comment":string}]}',
+    '- Every finding\'s "file" MUST be a string path. If a finding is not tied to a',
+    '  specific file, use "(general)" — never null.',
+    "- Output ONLY the JSON object as your final message, with no prose or code fences around it.",
   ].join("\n");
 }
 

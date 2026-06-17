@@ -132,7 +132,13 @@ export const taskEventSchema = z.object({
 }) satisfies z.ZodType<TaskEvent>;
 
 export const reviewFindingSchema = z.object({
-  file: z.string(),
+  // Claude Code reviewers (no enforced output schema) sometimes emit `file:
+  // null` for a finding that isn't tied to a specific file; coerce to a label
+  // so a loose verdict still parses.
+  file: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? "(general)"),
   // codex emits `line: null` (nullable in the strict output schema) when the
   // finding isn't tied to a line; normalize to undefined for consumers.
   line: z
