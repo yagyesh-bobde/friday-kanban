@@ -346,6 +346,20 @@ export function NewTaskModal() {
             }
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onPaste={(e) => {
+              const imageItems = Array.from(e.clipboardData.items).filter(
+                (item) => item.kind === "file" && item.type.startsWith("image/"),
+              );
+              if (imageItems.length > 0) {
+                e.preventDefault();
+                const files = imageItems
+                  .map((item) => item.getAsFile())
+                  .filter(Boolean) as File[];
+                const dt = new DataTransfer();
+                files.forEach((f) => dt.items.add(f));
+                void addFiles(dt.files);
+              }
+            }}
             className="font-mono text-[12px]"
           />
         </Field>
@@ -381,7 +395,7 @@ export function NewTaskModal() {
           hint={
             execution === "cloud"
               ? "local execution only — ignored on cloud runs"
-              : `optional · up to ${MAX_ATTACHMENTS} · PNG/JPG/GIF/WebP`
+              : `optional · up to ${MAX_ATTACHMENTS} · PNG/JPG/GIF/WebP · paste in prompt`
           }
         >
           <div className="space-y-2">
