@@ -238,6 +238,10 @@ export function Transcript({ task }: { task: Task }) {
   useEffect(() => {
     setItems([]);
     setEnded(false);
+    // Re-pin to the bottom on every (re)open: stickRef persists across tasks
+    // (the component is reused as the drawer switches tasks), so without this a
+    // task opened after scrolling up in a previous one would land at the top.
+    stickRef.current = true;
 
     const es = new EventSource(`/api/tasks/${task.id}/transcript`);
 
@@ -271,10 +275,15 @@ export function Transcript({ task }: { task: Task }) {
     return () => es.close();
   }, [task.id, live]);
 
-  // autoscroll while pinned to the bottom
+  // autoscroll while pinned to the bottom (next frame, so rows that reflow
+  // after commit — markdown, diffs — don't leave us a few pixels short)
   useEffect(() => {
-    const el = containerRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+    if (!stickRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      const el = containerRef.current;
+      if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [items]);
 
   return (
