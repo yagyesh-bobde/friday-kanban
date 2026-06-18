@@ -9,7 +9,24 @@ import { requireTask } from "./stateMachine";
 import { feedbackFromVerdict, runImplementerPhase } from "./implementer";
 import { commitOutstandingForReview, runReviewPhase } from "./reviewer";
 import { runCloudPipeline } from "./cloudPipeline";
-import { wasCanceled } from "./processRegistry";
+import { clearInterrupted, wasCanceled } from "./processRegistry";
+import { hasPendingMessages, takePendingMessages } from "@/server/db/taskMessages";
+
+/**
+ * Build a fix-round entry from any queued mid-task user messages, marking them
+ * consumed. Called at pipeline boundaries and after an interrupt so the user's
+ * message is handed to the resumed session as a human directive.
+ */
+function drainMessagesToFix(taskId: string): PipelineEntry {
+  clearInterrupted(taskId);
+  const messages = takePendingMessages(taskId);
+  const body = messages.join("\n\n").trim();
+  const feedbackMarkdown =
+    body.length > 0
+      ? ["**The user sent a message while this task was running:**", "", body].join("\n")
+      : "The user interrupted this task. Review the current state of the work and finish it.";
+  return { kind: "fix", feedbackMarkdown, humanDirective: true };
+}
 
 export type PipelineEntry =
   /** Fresh Todo -> In Dev start. */
@@ -48,6 +65,13 @@ export async function runTaskPipeline(taskId: string, entry: PipelineEntry): Pro
   for (;;) {
     if (wasCanceled(taskId)) return;
 
+    // Mid-task chat: a queued user message takes priority at any boundary. This
+    // also covers the race where the interrupt found no live process to kill
+    // (the run had just ended) — the message is still drained here.
+    if (next.kind !== "fix" && hasPendingMessages(taskId)) {
+      next = drainMessagesToFix(taskId);
+    }
+
     if (next.kind === "implement" || next.kind === "fix") {
       const outcome = await runImplementerPhase(
         taskId,
@@ -59,6 +83,11 @@ export async function runTaskPipeline(taskId: string, entry: PipelineEntry): Pro
             }
           : { mode: "start" },
       );
+      if (outcome.interrupted) {
+        // A mid-task message killed the run; resume the session with it.
+        next = drainMessagesToFix(taskId);
+        continue;
+      }
       if (!outcome.ok) return; // dev_failed / canceled — recorded already
       next = { kind: "review" };
       continue;
@@ -78,6 +107,10 @@ export async function runTaskPipeline(taskId: string, entry: PipelineEntry): Pro
       case "failed":
       case "canceled":
         return;
+      case "interrupted":
+        // Reviewer killed by a mid-task message; resume in dev with it.
+        next = drainMessagesToFix(taskId);
+        continue;
       case "changes_requested":
         next = { kind: "fix", feedbackMarkdown: feedbackFromVerdict(review.verdict) };
         continue;

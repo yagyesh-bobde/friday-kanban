@@ -143,8 +143,11 @@ export function TaskDrawer() {
   const spec = task ? resolveSpec(task, config, activeAgentColumn(task.column)) : null;
   const isLive = task?.runState === "running" || task?.runState === "queued";
   const verdictCount = detail?.verdicts.length ?? 0;
+  const running = task?.runState === "running";
   const canMessage =
-    task?.runState === "error" || task?.runState === "needs_attention";
+    task?.runState === "error" ||
+    task?.runState === "needs_attention" ||
+    task?.runState === "running";
 
   const submitMessage = async () => {
     if (!task || message.trim() === "" || sending) return;
@@ -339,7 +342,11 @@ export function TaskDrawer() {
                 <div className="mt-3 rounded-md border border-edge bg-base/40 p-2">
                   <Textarea
                     rows={2}
-                    placeholder="Send a message into this task's session — tell the agent what to do, then it resumes. (⌘↵)"
+                    placeholder={
+                      running
+                        ? "Message this running task — it'll be interrupted and resume with your instructions. (⌘↵)"
+                        : "Send a message into this task's session — tell the agent what to do, then it resumes. (⌘↵)"
+                    }
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={(e) => {
@@ -348,9 +355,15 @@ export function TaskDrawer() {
                   />
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-[11px] text-faint">
-                      Resumes the agent{" "}
-                      {task.column === "in_review" ? "in a fix round" : "in the same session"} with
-                      your instructions.
+                      {running ? (
+                        "Interrupts the current agent run and resumes the same session with your message."
+                      ) : (
+                        <>
+                          Resumes the agent{" "}
+                          {task.column === "in_review" ? "in a fix round" : "in the same session"}{" "}
+                          with your instructions.
+                        </>
+                      )}
                     </span>
                     <Button
                       variant="primary"

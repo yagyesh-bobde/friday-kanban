@@ -88,9 +88,13 @@ when `schedulerMode === 'auto'`). With `startNow: true` the implementer is start
 on demand immediately (Todo → In Dev, same admission path as a manual drag),
 regardless of scheduler mode — the returned `Task` reflects the started state.
 
-- Body: `CreateTaskInput = { projectId; title; prompt; contextPaths?; images?; branch?; workspaceMode?; execution?; modelOverrides?; startNow? }`
+- Body: `CreateTaskInput = { projectId; title; prompt; contextPaths?; scopePaths?; images?; branch?; workspaceMode?; execution?; modelOverrides?; startNow? }`
   - `branch` defaults to the project's `baseBranch`; `workspaceMode` defaults to `'branch'`;
     `execution` defaults to the project's `defaultExecution`; `startNow` defaults to `false`.
+  - `scopePaths?: string[]` — glob/path patterns (relative to repo root) this task may touch.
+    Two same-branch tasks whose scopes are **disjoint** run in parallel instead of queueing;
+    overlapping (or empty/undeclared) scopes serialize as before. A scoped task's commit stages
+    only its in-scope changed files, so concurrent disjoint tasks never cross-commit.
   - `images?: { name; dataUrl }[]` — up to 6 base64 image data URLs (PNG/JPG/GIF/WebP,
     ≤10 MB each). Saved under `~/.friday-kanban/attachments/<taskId>/` and referenced by
     absolute path in the local implementer prompt (ignored for `execution: 'cloud'`).
@@ -138,16 +142,22 @@ Retry a task whose `runState` is `'error'` or `'needs_attention'`. Delegates to
 
 ### POST /api/tasks/[id]/message
 
-Resume a task whose `runState` is `'error'` or `'needs_attention'` with a
+Send a free-form user message to a task. **Mid-task chat:** if `runState` is
+`'running'`, the live agent is interrupted (not canceled) and the pipeline
+resumes the same session with the message as a human directive — see
+`orchestrator.messageRunningTask(id, message)`.
+
+Otherwise, resume a task whose `runState` is `'error'` or `'needs_attention'` with a
 free-form user message, handed to the agent as a directive (instead of a blind
 retry). An `in_review` task moves back to In Dev for a fix round; an `in_dev`
 task resumes its existing Claude session. Delegates to
 `orchestrator.resumeWithMessage(id, message)`.
 
-- Body: `{ message: string }` (non-empty)
+- Body: `{ message: string }` (non-empty). Allowed when `runState` is `'running'`,
+  `'error'`, or `'needs_attention'`.
 - Response `200`: `Task`
 - Errors: `400` (`invalid_input` — empty/missing message), `404`, `409`
-  (`invalid_transition` — task not in `error`/`needs_attention`)
+  (`invalid_transition` — task not in `running`/`error`/`needs_attention`)
 
 ### POST /api/tasks/[id]/cancel
 

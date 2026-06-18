@@ -29,6 +29,7 @@ interface TaskRow {
   title: string;
   prompt: string;
   context_paths: string;
+  scope_paths: string;
   branch: string;
   workspace_mode: Task["workspaceMode"];
   board_column: Column;
@@ -63,6 +64,7 @@ function rowToTask(row: TaskRow): Task {
     title: row.title,
     prompt: row.prompt,
     contextPaths: JSON.parse(row.context_paths) as string[],
+    scopePaths: JSON.parse(row.scope_paths) as string[],
     branch: row.branch,
     workspaceMode: row.workspace_mode,
     column: row.board_column,
@@ -102,6 +104,7 @@ export type TaskUpdate = Partial<
     | "title"
     | "prompt"
     | "contextPaths"
+    | "scopePaths"
     | "branch"
     | "workspaceMode"
     | "column"
@@ -127,6 +130,7 @@ function taskToRowParams(task: Task) {
     title: task.title,
     prompt: task.prompt,
     contextPaths: JSON.stringify(task.contextPaths),
+    scopePaths: JSON.stringify(task.scopePaths),
     branch: task.branch,
     workspaceMode: task.workspaceMode,
     boardColumn: task.column,
@@ -152,6 +156,7 @@ const UPDATE_SQL = `
     title = @title,
     prompt = @prompt,
     context_paths = @contextPaths,
+    scope_paths = @scopePaths,
     branch = @branch,
     workspace_mode = @workspaceMode,
     board_column = @boardColumn,
@@ -180,6 +185,7 @@ export interface CreateTaskRecord {
   title: string;
   prompt: string;
   contextPaths: string[];
+  scopePaths: string[];
   branch: string;
   workspaceMode: Task["workspaceMode"];
   execution: Task["execution"];
@@ -199,6 +205,7 @@ export function createTask(record: CreateTaskRecord): { task: Task; event: TaskE
     title: record.title,
     prompt: record.prompt,
     contextPaths: record.contextPaths,
+    scopePaths: record.scopePaths,
     branch: record.branch,
     workspaceMode: record.workspaceMode,
     column: "todo",
@@ -215,12 +222,12 @@ export function createTask(record: CreateTaskRecord): { task: Task; event: TaskE
   const insert = db.transaction(() => {
     db.prepare(
       `INSERT INTO tasks (
-         id, project_id, title, prompt, context_paths, branch, workspace_mode,
+         id, project_id, title, prompt, context_paths, scope_paths, branch, workspace_mode,
          board_column, run_state, execution, model_overrides, worktree,
          claude_session_id, codex_thread_id, remote_session_id,
          review_cycle, commit_shas, pr_url, cost_usd, error, created_at, updated_at
        ) VALUES (
-         @id, @projectId, @title, @prompt, @contextPaths, @branch, @workspaceMode,
+         @id, @projectId, @title, @prompt, @contextPaths, @scopePaths, @branch, @workspaceMode,
          @boardColumn, @runState, @execution, @modelOverrides, @worktree,
          @claudeSessionId, @codexThreadId, @remoteSessionId,
          @reviewCycle, @commitShas, @prUrl, @costUsd, @error, @createdAt, @updatedAt

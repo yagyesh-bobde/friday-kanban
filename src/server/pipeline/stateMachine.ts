@@ -153,6 +153,13 @@ const TRANSITIONS: Partial<Record<TaskEventType, TransitionSpec>> = {
     fromRunStates: ["running", "queued"],
     toRunState: "idle",
   },
+  // A mid-task user message interrupted a live run. Not a failure: drop to idle
+  // in the current column so the pipeline can resume with the message.
+  task_interrupted: {
+    fromColumns: [],
+    fromRunStates: ["running"],
+    toRunState: "idle",
+  },
   manual_move: {
     fromColumns: [],
     fromRunStates: [],

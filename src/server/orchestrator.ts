@@ -29,6 +29,7 @@ import {
 } from "@/server/db/tasks";
 import { getConfig } from "@/server/db/config";
 import { saveTaskAttachments } from "@/server/attachments";
+import { enqueueTaskMessage } from "@/server/db/taskMessages";
 import { publish } from "@/server/bus";
 import {
   InvalidTransitionError,
@@ -43,6 +44,7 @@ import {
   cancelProcesses,
   clearCanceled,
   hasLiveProcess,
+  interruptProcesses,
 } from "@/server/pipeline/processRegistry";
 import { createPrForProjectBranch } from "@/server/pipeline/prCreator";
 import { getOrGenerateStatusReports as generateStatusReports } from "@/server/reports/statusReports";
@@ -105,6 +107,7 @@ export class Orchestrator {
       title: input.title,
       prompt: input.prompt,
       contextPaths: input.contextPaths ?? [],
+      scopePaths: input.scopePaths ?? [],
       branch: input.branch ?? project.baseBranch,
       workspaceMode: input.workspaceMode ?? "branch",
       execution: input.execution ?? project.defaultExecution,
@@ -286,6 +289,31 @@ export class Orchestrator {
         getScheduler().enqueue(taskId, { kind: "implement" });
       }
     }
+    return requireTask(taskId);
+  }
+
+  /**
+   * Mid-task chat: send a free-form message to a RUNNING task. The message is
+   * persisted, then the live agent is interrupted (not canceled). The running
+   * pipeline drains the message at the interrupt boundary and resumes the same
+   * session with it as a human directive (a fix round). If no live process is
+   * found (the run just ended), the queued message is still picked up at the
+   * pipeline's next boundary.
+   */
+  async messageRunningTask(taskId: string, message: string): Promise<Task> {
+    const task = requireTask(taskId);
+    if (task.runState !== "running") {
+      throw new InvalidTransitionError(
+        `messaging a running task requires runState 'running' (got '${task.runState}')`,
+      );
+    }
+    const trimmed = message.trim();
+    if (trimmed.length === 0) {
+      throw new InvalidTransitionError("a message is required");
+    }
+
+    enqueueTaskMessage(taskId, trimmed);
+    interruptProcesses(taskId);
     return requireTask(taskId);
   }
 

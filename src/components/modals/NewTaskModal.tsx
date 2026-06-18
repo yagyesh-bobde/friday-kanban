@@ -84,6 +84,7 @@ export function NewTaskModal() {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [contextPaths, setContextPaths] = useState<string[]>([]);
+  const [scopePaths, setScopePaths] = useState<string[]>([]);
   const [images, setImages] = useState<TaskImageInput[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [branchChoice, setBranchChoice] = useState<string>("");
@@ -110,6 +111,7 @@ export function NewTaskModal() {
     setTitle("");
     setPrompt("");
     setContextPaths([]);
+    setScopePaths([]);
     setImages([]);
     setNewBranchName("");
     setWorkspaceMode("branch");
@@ -197,6 +199,7 @@ export function NewTaskModal() {
       title: title.trim(),
       prompt: prompt.trim(),
       ...(contextPaths.length > 0 ? { contextPaths } : {}),
+      ...(scopePaths.length > 0 ? { scopePaths } : {}),
       ...(images.length > 0 ? { images } : {}),
       branch: effectiveBranch,
       workspaceMode,
@@ -354,6 +357,22 @@ export function NewTaskModal() {
             onChange={setContextPaths}
             placeholder="src/lib/auth.ts, docs/spec.md …"
           />
+        </Field>
+
+        {/* file scope */}
+        <Field label="File scope (optional)">
+          <div className="space-y-1.5">
+            <ChipsInput
+              value={scopePaths}
+              onChange={setScopePaths}
+              placeholder="src/server/** , src/lib/foo.ts"
+            />
+            <p className="text-[11px] leading-snug text-faint">
+              Globs/paths this task will touch. Same-branch tasks with non-overlapping scopes
+              run in parallel instead of queueing. Leave empty to run serially. When set, the
+              agent&apos;s edits are limited to this scope and committed for you.
+            </p>
+          </div>
         </Field>
 
         {/* image attachments */}

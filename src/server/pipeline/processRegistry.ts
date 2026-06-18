@@ -9,6 +9,12 @@ interface RegistryState {
   kills: Map<string, Set<() => void>>;
   /** Tasks explicitly canceled by the user; consumed by the pipeline. */
   canceled: Set<string>;
+  /**
+   * Tasks whose live agent was interrupted by a mid-task user message (NOT a
+   * cancel). The pipeline treats an interrupt as "stop this run cleanly and
+   * resume with the queued message" rather than a failure.
+   */
+  interrupted: Set<string>;
 }
 
 const GLOBAL_KEY = "__fridayKanbanProcessRegistry" as const;
@@ -20,7 +26,7 @@ type GlobalWithRegistry = typeof globalThis & {
 function state(): RegistryState {
   const g = globalThis as GlobalWithRegistry;
   if (!g[GLOBAL_KEY]) {
-    g[GLOBAL_KEY] = { kills: new Map(), canceled: new Set() };
+    g[GLOBAL_KEY] = { kills: new Map(), canceled: new Set(), interrupted: new Set() };
   }
   return g[GLOBAL_KEY];
 }
@@ -88,4 +94,34 @@ export function wasCanceled(taskId: string): boolean {
 /** Clear the canceled flag (when a task is retried / restarted). */
 export function clearCanceled(taskId: string): void {
   state().canceled.delete(taskId);
+}
+
+/**
+ * Mark the task interrupted (mid-task message) and kill its live process(es).
+ * Unlike cancel, this is NOT a failure — the pipeline resumes with the queued
+ * message. Returns true if a live process was killed.
+ */
+export function interruptProcesses(taskId: string): boolean {
+  const s = state();
+  s.interrupted.add(taskId);
+  const set = s.kills.get(taskId);
+  if (!set || set.size === 0) return false;
+  for (const kill of set) {
+    try {
+      kill();
+    } catch {
+      // best effort
+    }
+  }
+  return true;
+}
+
+/** Check whether the task was interrupted by a mid-task message. */
+export function wasInterrupted(taskId: string): boolean {
+  return state().interrupted.has(taskId);
+}
+
+/** Clear the interrupted flag (after the pipeline has drained the message). */
+export function clearInterrupted(taskId: string): void {
+  state().interrupted.delete(taskId);
 }

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title             TEXT NOT NULL,
   prompt            TEXT NOT NULL,
   context_paths     TEXT NOT NULL DEFAULT '[]',  -- JSON string[]
+  scope_paths       TEXT NOT NULL DEFAULT '[]',  -- JSON string[] of glob/path patterns this task may touch
   branch            TEXT NOT NULL,
   workspace_mode    TEXT NOT NULL DEFAULT 'branch' CHECK (workspace_mode IN ('branch','worktree','new-branch')),
   board_column      TEXT NOT NULL DEFAULT 'todo' CHECK (board_column IN ('todo','in_dev','in_review','done')),
@@ -102,7 +103,35 @@ CREATE TABLE IF NOT EXISTS config (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL                             -- JSON
 );
+
+-- Free-form user messages addressed to a task (mid-task chat). A message sent
+-- to a RUNNING task interrupts the live agent; the pipeline drains unconsumed
+-- messages at the next boundary and resumes the session with them as a
+-- human directive (fix round).
+CREATE TABLE IF NOT EXISTS task_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  message     TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  consumed_at TEXT                                -- NULL until drained by the pipeline
+);
+CREATE INDEX IF NOT EXISTS idx_task_messages_pending ON task_messages(task_id, consumed_at, id);
 `;
+
+/**
+ * Additive migrations for DBs created before a column existed. CREATE TABLE IF
+ * NOT EXISTS never alters an existing table, so new columns are added here,
+ * each guarded against the "duplicate column" error so this stays idempotent.
+ */
+function migrate(db: Database.Database): void {
+  const columnExists = (table: string, column: string): boolean => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    return cols.some((c) => c.name === column);
+  };
+  if (!columnExists("tasks", "scope_paths")) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN scope_paths TEXT NOT NULL DEFAULT '[]'`);
+  }
+}
 
 function openDb(): Database.Database {
   ensureRuntimeDirs();
@@ -111,6 +140,7 @@ function openDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

@@ -86,6 +86,14 @@ export interface Task {
   prompt: string;
   /** Extra repo files/dirs referenced in the prompt (paths relative to repo root). */
   contextPaths: string[];
+  /**
+   * Glob/path patterns (relative to repo root) this task is allowed to touch.
+   * Empty = undeclared (the task may touch anything, so it serializes with
+   * every other task on its branch). When two same-branch tasks both declare
+   * NON-overlapping scopes they run in parallel instead of queueing, and a
+   * scoped task's commit stages ONLY these paths (see scheduler + implementer).
+   */
+  scopePaths: string[];
   /** Target branch in the project checkout (defaults to the project's baseBranch). */
   branch: string;
   workspaceMode: WorkspaceMode;
@@ -137,6 +145,7 @@ export type TaskEventType =
   | "pr_created"
   | "task_retried"
   | "task_canceled"
+  | "task_interrupted"
   | "manual_move"
   | "budget_exceeded"
   | "error";
@@ -315,6 +324,8 @@ export interface CreateTaskInput {
   title: string;
   prompt: string;
   contextPaths?: string[];
+  /** Glob/path patterns this task is allowed to touch (enables same-branch parallelism). */
+  scopePaths?: string[];
   /** Prompt image attachments (local execution only — read by the agent's Read tool). */
   images?: TaskImageInput[];
   branch?: string; // default: project.baseBranch
