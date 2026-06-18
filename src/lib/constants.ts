@@ -78,7 +78,7 @@ export const LEGAL_MOVES: Record<Column, readonly Column[]> = {
 
 export const COLUMN_DEFAULTS: Record<AgentColumn, ModelSpec> = {
   in_dev: { provider: "claude-code", model: "opus", effort: "high" },
-  in_review: { provider: "codex", model: "gpt-5.5", effort: "medium" },
+  in_review: { provider: "claude-code", model: "haiku", effort: "medium" },
 };
 
 /**
