@@ -29,8 +29,14 @@ interface UiStore {
   // new task modal
   newTaskOpen: boolean;
   newTaskProjectId?: string;
-  openNewTask: (projectId?: string) => void;
+  newTaskInitialPrompt?: string;
+  openNewTask: (projectId?: string, initialPrompt?: string) => void;
   closeNewTask: () => void;
+
+  // quick-create modal (Cmd+K)
+  quickCreateOpen: boolean;
+  openQuickCreate: () => void;
+  closeQuickCreate: () => void;
 
   // add project modal
   addProjectOpen: boolean;
@@ -63,9 +69,15 @@ export const useUi = create<UiStore>()((set, get) => ({
 
   newTaskOpen: false,
   newTaskProjectId: undefined,
-  openNewTask: (projectId) =>
-    set({ newTaskOpen: true, newTaskProjectId: projectId }),
-  closeNewTask: () => set({ newTaskOpen: false, newTaskProjectId: undefined }),
+  newTaskInitialPrompt: undefined,
+  openNewTask: (projectId, initialPrompt) =>
+    set({ newTaskOpen: true, newTaskProjectId: projectId, newTaskInitialPrompt: initialPrompt }),
+  closeNewTask: () =>
+    set({ newTaskOpen: false, newTaskProjectId: undefined, newTaskInitialPrompt: undefined }),
+
+  quickCreateOpen: false,
+  openQuickCreate: () => set({ quickCreateOpen: true }),
+  closeQuickCreate: () => set({ quickCreateOpen: false }),
 
   addProjectOpen: false,
   openAddProject: () => set({ addProjectOpen: true }),

@@ -374,3 +374,32 @@ export interface ApiError {
   /** Optional machine-readable code, e.g. 'invalid_transition', 'not_found'. */
   code?: string;
 }
+
+// ── Quick task create (Cmd+K) ──────────────────────────────────────────────
+
+/** One answer to a clarifying question, keyed by the question's id. */
+export interface QuickCreateAnswer {
+  id: string;
+  answer: string;
+}
+
+/** Request payload for POST /api/tasks/quick-create. */
+export interface QuickCreateInput {
+  /** The user's raw natural-language task text. */
+  text: string;
+  /** Answers to a prior round of clarifying questions, if any. */
+  answers?: QuickCreateAnswer[];
+}
+
+/** A clarifying question the parser asks when it cannot resolve the task. */
+export interface QuickCreateQuestion {
+  id: string;
+  question: string;
+  /** Suggested answers; the UI also offers a free-text "Other". */
+  options: string[];
+}
+
+/** Response from POST /api/tasks/quick-create. */
+export type QuickCreateResponse =
+  | { status: "created"; task: Task }
+  | { status: "needs_input"; questions: QuickCreateQuestion[] };
