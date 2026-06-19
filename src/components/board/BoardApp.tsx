@@ -21,9 +21,10 @@ import type { Column as ColumnId, Task } from "@/lib/types";
 import { COLUMNS } from "@/lib/constants";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
-import { legalTargetsFor } from "@/components/util";
+import { isPastTask, legalTargetsFor } from "@/components/util";
 import { BoardHeader } from "./BoardHeader";
 import { BoardColumn } from "./Column";
+import { PastTasksPane } from "./PastTasksPane";
 import { TaskCardBody } from "./TaskCard";
 import { StatusPane } from "@/components/StatusPane";
 import { Toasts } from "@/components/ui/Toasts";
@@ -74,7 +75,11 @@ function BoardColumns() {
 
   const byColumn = useMemo(() => {
     const map: Record<ColumnId, Task[]> = { todo: [], in_dev: [], in_review: [], done: [] };
-    for (const task of Object.values(tasks)) map[task.column].push(task);
+    // Done cards aged past the cutoff live in the Past view, not the board.
+    for (const task of Object.values(tasks)) {
+      if (isPastTask(task)) continue;
+      map[task.column].push(task);
+    }
     // todo: FIFO order (oldest first, matches queue order); done: newest first;
     // active columns: most recently touched first.
     map.todo.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -150,6 +155,7 @@ export default function BoardApp() {
   const loaded = useBoard((s) => s.loaded);
   const loadError = useBoard((s) => s.loadError);
   const hasProjects = useBoard((s) => s.projects.length > 0);
+  const boardView = useUi((s) => s.boardView);
 
   useEffect(() => {
     void init();
@@ -178,6 +184,8 @@ export default function BoardApp() {
           </div>
         ) : !hasProjects ? (
           <NoProjects />
+        ) : boardView === "past" ? (
+          <PastTasksPane />
         ) : (
           <BoardColumns />
         )}

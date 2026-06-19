@@ -19,7 +19,13 @@ export interface Toast {
 
 let toastSeq = 1;
 
+export type BoardView = "board" | "past";
+
 interface UiStore {
+  // active board vs. past (aged-out done) tasks
+  boardView: BoardView;
+  setBoardView: (view: BoardView) => void;
+
   // new task modal
   newTaskOpen: boolean;
   newTaskProjectId?: string;
@@ -52,6 +58,9 @@ interface UiStore {
 }
 
 export const useUi = create<UiStore>()((set, get) => ({
+  boardView: "board",
+  setBoardView: (view) => set({ boardView: view }),
+
   newTaskOpen: false,
   newTaskProjectId: undefined,
   openNewTask: (projectId) =>

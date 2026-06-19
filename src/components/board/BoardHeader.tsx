@@ -7,7 +7,7 @@
 
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
-import { cn } from "@/components/util";
+import { cn, isPastTask } from "@/components/util";
 import { Segmented, Stepper } from "@/components/ui/fields";
 import { IconPlus, IconSpark } from "@/components/ui/icons";
 import { CreatePrMenu } from "./CreatePrMenu";
@@ -18,8 +18,13 @@ export function BoardHeader() {
   const connection = useBoard((s) => s.connection);
   const updateConfig = useBoard((s) => s.updateConfig);
   const projects = useBoard((s) => s.projects);
+  const pastCount = useBoard((s) =>
+    Object.values(s.tasks).reduce((n, t) => n + (isPastTask(t) ? 1 : 0), 0),
+  );
   const openNewTask = useUi((s) => s.openNewTask);
   const openAddProject = useUi((s) => s.openAddProject);
+  const boardView = useUi((s) => s.boardView);
+  const setBoardView = useUi((s) => s.setBoardView);
 
   return (
     <header className="relative z-40 flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
@@ -80,6 +85,31 @@ export function BoardHeader() {
       </div>
 
       <span className="flex-1" />
+
+      <Segmented
+        size="sm"
+        value={boardView}
+        onChange={setBoardView}
+        options={[
+          { value: "board", label: "Board", title: "Active kanban" },
+          {
+            value: "past",
+            title: "Done tasks untouched for over a week, by date",
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                Past
+                {pastCount > 0 ? (
+                  <span className="rounded bg-overlay px-1 py-px font-mono text-[9px] text-faint">
+                    {pastCount}
+                  </span>
+                ) : null}
+              </span>
+            ),
+          },
+        ]}
+      />
+
+      <div className="mx-1 h-5 w-px bg-edge" />
 
       <CreatePrMenu />
       <SettingsPopover />

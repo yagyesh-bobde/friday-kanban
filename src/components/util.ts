@@ -131,3 +131,44 @@ export function todayLabel(): string {
     day: "numeric",
   });
 }
+
+// ---------------------------------------------------------------------------
+// Past tasks — completed work that's aged out of the active board
+// ---------------------------------------------------------------------------
+
+/** A Done task this many days untouched drops off the board into the Past view. */
+export const PAST_TASK_AGE_DAYS = 7;
+
+/**
+ * A "past" task is a Done card last touched more than PAST_TASK_AGE_DAYS ago.
+ * Active columns (todo/in_dev/in_review) are never hidden — stalled live work
+ * should stay visible.
+ */
+export function isPastTask(task: Task): boolean {
+  if (task.column !== "done") return false;
+  const updated = new Date(task.updatedAt).getTime();
+  if (Number.isNaN(updated)) return false;
+  return Date.now() - updated > PAST_TASK_AGE_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/** Stable local-calendar key (YYYY-MM-DD) for grouping tasks by day. */
+export function dateGroupKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = `${d.getMonth() + 1}`.padStart(2, "0");
+  const day = `${d.getDate()}`.padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Human date heading for a Past view section, e.g. "Fri, Jun 13, 2026". */
+export function dateGroupLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
