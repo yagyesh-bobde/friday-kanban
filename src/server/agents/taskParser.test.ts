@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Project } from "@/lib/types";
-import { buildParserPrompt, interpretParserOutput } from "./taskParser";
+import { buildParserPrompt, interpretParserOutput, toCreateTaskInput } from "./taskParser";
 
 const projects: Project[] = [
   {
@@ -83,4 +83,37 @@ test("interpretParserOutput errors on unknown project", () => {
 test("interpretParserOutput errors on garbage", () => {
   assert.equal(interpretParserOutput("not json at all", projects).kind, "error");
   assert.equal(interpretParserOutput("", projects).kind, "error");
+});
+
+// ── toCreateTaskInput ────────────────────────────────────────────────────────
+
+const p1 = projects[0]!;
+const p2 = projects[1]!;
+
+test("toCreateTaskInput defaults branch and execution from project, sets startNow:false, omits optional paths", () => {
+  const task = { projectId: "p1", title: "Fix bug", prompt: "Fix the login bug" };
+  const result = toCreateTaskInput(task, p1);
+  assert.equal(result.branch, "main");
+  assert.equal(result.execution, "local");
+  assert.equal(result.startNow, false);
+  assert.equal("scopePaths" in result, false);
+  assert.equal("contextPaths" in result, false);
+});
+
+test("toCreateTaskInput keeps explicit branch/execution and includes paths when provided", () => {
+  const task = {
+    projectId: "p2",
+    title: "Add feature",
+    prompt: "Add the dark mode feature",
+    branch: "feat/dark-mode",
+    execution: "local" as const,
+    scopePaths: ["src/theme/**"],
+    contextPaths: ["src/components/Button.tsx"],
+  };
+  const result = toCreateTaskInput(task, p2);
+  assert.equal(result.branch, "feat/dark-mode");
+  assert.equal(result.execution, "local");
+  assert.deepEqual(result.scopePaths, ["src/theme/**"]);
+  assert.deepEqual(result.contextPaths, ["src/components/Button.tsx"]);
+  assert.equal(result.startNow, false);
 });

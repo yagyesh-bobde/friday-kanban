@@ -12,6 +12,7 @@
  */
 
 import type {
+  CreateTaskInput,
   Execution,
   Project,
   QuickCreateAnswer,
@@ -39,6 +40,20 @@ export type QuickParseResult =
   | { kind: "task"; task: ParsedTask }
   | { kind: "questions"; questions: QuickCreateQuestion[] }
   | { kind: "error"; reason: string };
+
+/** Normalize a parsed task + its project into a CreateTaskInput (Todo, not started). */
+export function toCreateTaskInput(task: ParsedTask, project: Project): CreateTaskInput {
+  return {
+    projectId: task.projectId,
+    title: task.title,
+    prompt: task.prompt,
+    branch: task.branch ?? project.baseBranch,
+    execution: task.execution ?? project.defaultExecution,
+    ...(task.scopePaths ? { scopePaths: task.scopePaths } : {}),
+    ...(task.contextPaths ? { contextPaths: task.contextPaths } : {}),
+    startNow: false,
+  };
+}
 
 export interface BuildPromptParams {
   rawText: string;

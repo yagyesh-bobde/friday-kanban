@@ -27,6 +27,16 @@ export function QuickCreateModal() {
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>({ stage: "input" });
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+
+  // Track mounted state to avoid setState after unmount/close.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // Reset and focus on open.
   useEffect(() => {
@@ -45,6 +55,8 @@ export function QuickCreateModal() {
   const submit = async (answers: QuickCreateAnswer[]) => {
     const trimmed = text.trim();
     if (trimmed.length === 0) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPhase({ stage: "loading" });
     try {
       const res = await api.quickCreateTask({
@@ -52,6 +64,7 @@ export function QuickCreateModal() {
         ...(answers.length > 0 ? { answers } : {}),
       });
       if (res.status === "needs_input") {
+        if (!mounted.current) return;
         setPhase({ stage: "questions", questions: res.questions });
         return;
       }
@@ -65,7 +78,10 @@ export function QuickCreateModal() {
         return;
       }
       const message = err instanceof ApiHttpError ? err.friendly : "Something went wrong.";
+      if (!mounted.current) return;
       setPhase({ stage: "error", message });
+    } finally {
+      inFlight.current = false;
     }
   };
 

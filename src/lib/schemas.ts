@@ -20,6 +20,7 @@ import type {
   MoveTaskInput,
   Project,
   ProjectStatusReport,
+  QuickCreateInput,
   ReviewFinding,
   ReviewVerdict,
   Task,
@@ -260,7 +261,7 @@ export const quickCreateInputSchema = z.object({
   answers: z
     .array(z.object({ id: z.string().min(1), answer: z.string().min(1) }))
     .optional(),
-});
+}) satisfies z.ZodType<QuickCreateInput>;
 
 const quickParseQuestionSchema = z.object({
   id: z.string().min(1),
@@ -280,8 +281,8 @@ export const quickParseOutputSchema = z.discriminatedUnion("kind", [
       title: z.string().min(1),
       prompt: z.string().min(1),
       branch: z.string().min(1).optional(),
-      scopePaths: z.array(z.string()).optional(),
-      contextPaths: z.array(z.string()).optional(),
+      scopePaths: z.array(z.string().min(1)).optional(),
+      contextPaths: z.array(z.string().min(1)).optional(),
       execution: executionSchema.optional(),
     }),
   }),

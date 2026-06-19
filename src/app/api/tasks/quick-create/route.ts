@@ -8,10 +8,10 @@
  * failure returns 422 so the client can fall back to the full New Task editor.
  */
 
-import { quickCreateInputSchema } from "@/lib/schemas";
-import type { CreateTaskInput, QuickCreateResponse } from "@/lib/types";
+import { createTaskInputSchema, quickCreateInputSchema } from "@/lib/schemas";
+import type { QuickCreateResponse } from "@/lib/types";
 import { listProjects } from "@/server/db/projects";
-import { runTaskParser } from "@/server/agents/taskParser";
+import { runTaskParser, toCreateTaskInput } from "@/server/agents/taskParser";
 import { getOrchestrator } from "@/server/orchestrator";
 import { apiError, handleRouteError, parseBody } from "../../_lib/http";
 
@@ -49,18 +49,13 @@ export async function POST(request: Request): Promise<Response> {
       return apiError(422, "Resolved project no longer exists.", "parse_failed");
     }
 
-    const input: CreateTaskInput = {
-      projectId: result.task.projectId,
-      title: result.task.title,
-      prompt: result.task.prompt,
-      branch: result.task.branch ?? project.baseBranch,
-      execution: result.task.execution ?? project.defaultExecution,
-      ...(result.task.scopePaths ? { scopePaths: result.task.scopePaths } : {}),
-      ...(result.task.contextPaths ? { contextPaths: result.task.contextPaths } : {}),
-      startNow: false,
-    };
+    const input = toCreateTaskInput(result.task, project);
+    const validated = createTaskInputSchema.safeParse(input);
+    if (!validated.success) {
+      return apiError(422, "Could not build a valid task from your input.", "parse_failed");
+    }
 
-    const task = await getOrchestrator().createTask(input);
+    const task = await getOrchestrator().createTask(validated.data);
     const payload: QuickCreateResponse = { status: "created", task };
     return Response.json(payload, { status: 201 });
   } catch (err) {
