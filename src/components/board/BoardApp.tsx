@@ -31,6 +31,7 @@ import { NewTaskModal } from "@/components/modals/NewTaskModal";
 import { AddProjectModal } from "@/components/modals/AddProjectModal";
 import { SendBackDialog } from "@/components/modals/SendBackDialog";
 import { TaskDrawer } from "@/components/task/TaskDrawer";
+import { FireVibes } from "@/components/effects/FireVibes";
 import { IconFolder, IconSpark, Spinner } from "@/components/ui/icons";
 import { Button } from "@/components/ui/fields";
 
@@ -190,6 +191,9 @@ export default function BoardApp() {
       <AddProjectModal />
       <SendBackDialog />
       <Toasts />
+
+      {/* just for the vibes */}
+      <FireVibes />
     </div>
   );
 }

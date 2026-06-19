@@ -180,6 +180,43 @@ export function Stepper({
 }
 
 // ---------------------------------------------------------------------------
+// Toggle (switch)
+// ---------------------------------------------------------------------------
+
+export function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-[20px] w-[34px] shrink-0 items-center rounded-full border transition-colors",
+        checked
+          ? "border-ember-dim bg-ember/80 shadow-[0_0_12px_rgba(242,163,60,0.3)]"
+          : "border-edge bg-raised",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-[14px] w-[14px] rounded-full bg-ink transition-transform",
+          checked ? "translate-x-[16px]" : "translate-x-[3px]",
+        )}
+      />
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Buttons
 // ---------------------------------------------------------------------------
 

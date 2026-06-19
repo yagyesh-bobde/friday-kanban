@@ -9,8 +9,9 @@ import { useRef, useState } from "react";
 import type { AgentColumn, Effort, ModelSpec, Provider } from "@/lib/types";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
+import { usePrefs } from "@/store/prefs";
 import { useClickOutside } from "@/components/ui/useClickOutside";
-import { Button, Field, Select, Stepper } from "@/components/ui/fields";
+import { Button, Field, Select, Stepper, Toggle } from "@/components/ui/fields";
 import { IconGear } from "@/components/ui/icons";
 import { cn } from "@/components/util";
 import {
@@ -85,6 +86,8 @@ export function SettingsPopover() {
   const config = useBoard((s) => s.config);
   const updateConfig = useBoard((s) => s.updateConfig);
   const toast = useUi((s) => s.toast);
+  const fireVibes = usePrefs((s) => s.fireVibes);
+  const setFireVibes = usePrefs((s) => s.setFireVibes);
 
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(config);
@@ -158,6 +161,20 @@ export function SettingsPopover() {
                 min={1}
                 max={9}
                 onChange={(v) => setDraft((d) => ({ ...d, maxReviewCycles: v }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between border-t border-edge pt-3">
+              <div>
+                <p className="text-[12px] font-medium">🔥 Fire vibes</p>
+                <p className="text-[11px] text-faint">
+                  Full-width flames along the bottom — saved per browser
+                </p>
+              </div>
+              <Toggle
+                checked={fireVibes}
+                onChange={setFireVibes}
+                label="Fire vibes"
               />
             </div>
           </div>

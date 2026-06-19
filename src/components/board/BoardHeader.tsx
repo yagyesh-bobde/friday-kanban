@@ -22,7 +22,7 @@ export function BoardHeader() {
   const openAddProject = useUi((s) => s.openAddProject);
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
+    <header className="relative z-40 flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
       {/* brand */}
       <div className="flex items-center gap-2">
         <IconSpark size={16} className="text-ember" />
