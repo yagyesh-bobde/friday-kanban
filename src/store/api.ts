@@ -15,6 +15,8 @@ import type {
   Project,
   ProjectBranches,
   ProjectStatusReport,
+  QuickCreateInput,
+  QuickCreateResponse,
   Task,
   TaskDetail,
   UpdateConfigInput,
@@ -93,6 +95,8 @@ export const api = {
   // tasks ---------------------------------------------------------------
   createTask: (input: CreateTaskInput) =>
     request<Task>("/api/tasks", post(input)),
+  quickCreateTask: (input: QuickCreateInput) =>
+    request<QuickCreateResponse>("/api/tasks/quick-create", post(input)),
   taskDetail: (taskId: string) => request<TaskDetail>(`/api/tasks/${taskId}`),
   moveTask: (taskId: string, to: Column, comment?: string) =>
     request<Task>(
