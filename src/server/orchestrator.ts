@@ -100,12 +100,27 @@ export class Orchestrator {
     const project = getProject(input.projectId);
     if (!project) throw new TaskNotFoundError(`project:${input.projectId}`);
 
+    const branch = input.branch ?? project.baseBranch;
+
+    // Per-repo branch overrides only apply to multi-repo projects. Keep only
+    // entries that name a real sub-repo and actually differ from the default.
+    let repoBranches: Record<string, string> | undefined;
+    if (project.repos && project.repos.length > 0 && input.repoBranches) {
+      const known = new Set(project.repos.map((r) => r.path));
+      const clean: Record<string, string> = {};
+      for (const [path, b] of Object.entries(input.repoBranches)) {
+        if (known.has(path) && b && b !== branch) clean[path] = b;
+      }
+      if (Object.keys(clean).length > 0) repoBranches = clean;
+    }
+
     const { task, event } = dbCreateTask({
       projectId: project.id,
       title: input.title,
       prompt: input.prompt,
       contextPaths: input.contextPaths ?? [],
-      branch: input.branch ?? project.baseBranch,
+      branch,
+      ...(repoBranches ? { repoBranches } : {}),
       workspaceMode: input.workspaceMode ?? "branch",
       execution: input.execution ?? project.defaultExecution,
       modelOverrides: input.modelOverrides,
@@ -314,10 +329,10 @@ export class Orchestrator {
    * The manual "Create PR" action for a project/branch (DESIGN.md decision 6):
    * push the branch; if an open PR exists for it, push into it, else
    * `gh pr create` with a body generated from all done tasks on that branch
-   * (titles, summaries, non-blocking review findings). Upserts and returns the
-   * BranchPR record.
+   * (titles, summaries, non-blocking review findings). Returns one BranchPR for
+   * a single-repo project, or one per changed sub-repo for a multi-repo project.
    */
-  async createPrForProject(projectId: string, branch: string): Promise<BranchPR> {
+  async createPrForProject(projectId: string, branch: string): Promise<BranchPR[]> {
     return createPrForProjectBranch(projectId, branch);
   }
 

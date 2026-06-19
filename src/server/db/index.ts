@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS projects (
   path              TEXT NOT NULL,
   base_branch       TEXT NOT NULL DEFAULT 'main',
   default_execution TEXT NOT NULL DEFAULT 'local' CHECK (default_execution IN ('local','cloud')),
+  repos             TEXT,                          -- JSON ProjectRepo[] | NULL (multi-repo projects)
   created_at        TEXT NOT NULL
 );
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   prompt            TEXT NOT NULL,
   context_paths     TEXT NOT NULL DEFAULT '[]',  -- JSON string[]
   branch            TEXT NOT NULL,
+  repo_branches     TEXT,                        -- JSON Record<repoPath,branch> | NULL (multi-repo per-repo branch overrides)
   workspace_mode    TEXT NOT NULL DEFAULT 'branch' CHECK (workspace_mode IN ('branch','worktree','new-branch')),
   board_column      TEXT NOT NULL DEFAULT 'todo' CHECK (board_column IN ('todo','in_dev','in_review','done')),
   run_state         TEXT NOT NULL DEFAULT 'idle' CHECK (run_state IN ('idle','queued','running','needs_attention','error')),
@@ -81,9 +83,11 @@ CREATE TABLE IF NOT EXISTS branch_prs (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   branch     TEXT NOT NULL,
   pr_url     TEXT NOT NULL,
+  repo_path  TEXT NOT NULL DEFAULT '',           -- multi-repo sub-repo root; '' for single-repo
+  repo_name  TEXT NOT NULL DEFAULT '',           -- multi-repo sub-repo display name; '' for single-repo
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE (project_id, branch)
+  UNIQUE (project_id, branch, repo_path)
 );
 
 CREATE TABLE IF NOT EXISTS status_reports (
@@ -104,6 +108,52 @@ CREATE TABLE IF NOT EXISTS config (
 );
 `;
 
+/** True when `table` already has a column named `column`. */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return cols.some((c) => c.name === column);
+}
+
+/**
+ * Forward-migrate DBs created before multi-repo support. CREATE TABLE IF NOT
+ * EXISTS is a no-op on an existing table, so additive/constraint changes are
+ * applied here.
+ */
+function migrate(db: Database.Database): void {
+  // projects.repos (JSON) — additive, safe via ALTER.
+  if (!hasColumn(db, "projects", "repos")) {
+    db.exec(`ALTER TABLE projects ADD COLUMN repos TEXT`);
+  }
+
+  // tasks.repo_branches (JSON) — additive, safe via ALTER.
+  if (!hasColumn(db, "tasks", "repo_branches")) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN repo_branches TEXT`);
+  }
+
+  // branch_prs gained a per-repo dimension AND a widened UNIQUE constraint
+  // (project_id, branch, repo_path). SQLite can't alter a constraint in place,
+  // so rebuild the table when the old schema is detected.
+  if (!hasColumn(db, "branch_prs", "repo_path")) {
+    db.exec(`
+      CREATE TABLE branch_prs_new (
+        id         TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        branch     TEXT NOT NULL,
+        pr_url     TEXT NOT NULL,
+        repo_path  TEXT NOT NULL DEFAULT '',
+        repo_name  TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, branch, repo_path)
+      );
+      INSERT INTO branch_prs_new (id, project_id, branch, pr_url, repo_path, repo_name, created_at, updated_at)
+        SELECT id, project_id, branch, pr_url, '', '', created_at, updated_at FROM branch_prs;
+      DROP TABLE branch_prs;
+      ALTER TABLE branch_prs_new RENAME TO branch_prs;
+    `);
+  }
+}
+
 function openDb(): Database.Database {
   ensureRuntimeDirs();
   const db = new Database(dbPath());
@@ -111,6 +161,7 @@ function openDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

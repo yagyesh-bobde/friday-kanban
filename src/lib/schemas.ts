@@ -19,6 +19,7 @@ import type {
   ModelSpec,
   MoveTaskInput,
   Project,
+  ProjectRepo,
   ProjectStatusReport,
   ReviewFinding,
   ReviewVerdict,
@@ -89,12 +90,19 @@ export const worktreeInfoSchema = z.object({
 // Entities
 // ---------------------------------------------------------------------------
 
+export const projectRepoSchema = z.object({
+  name: z.string().min(1),
+  path: z.string().min(1),
+  baseBranch: z.string().min(1),
+}) satisfies z.ZodType<ProjectRepo>;
+
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   path: z.string().min(1),
   baseBranch: z.string().min(1),
   defaultExecution: executionSchema,
+  repos: z.array(projectRepoSchema).optional(),
   createdAt: z.string(),
 }) satisfies z.ZodType<Project>;
 
@@ -105,6 +113,7 @@ export const taskSchema = z.object({
   prompt: z.string().min(1),
   contextPaths: z.array(z.string()),
   branch: z.string().min(1),
+  repoBranches: z.record(z.string(), z.string().min(1)).optional(),
   workspaceMode: workspaceModeSchema,
   column: columnSchema,
   runState: runStateSchema,
@@ -183,6 +192,8 @@ export const branchPrSchema = z.object({
   projectId: z.string(),
   branch: z.string().min(1),
   prUrl: z.string().min(1),
+  repoPath: z.string().min(1).optional(),
+  repoName: z.string().min(1).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 }) satisfies z.ZodType<BranchPR>;
@@ -217,6 +228,15 @@ export const createProjectInputSchema = z.object({
   path: z.string().min(1),
   baseBranch: z.string().min(1).optional(),
   defaultExecution: executionSchema.optional(),
+  repos: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        path: z.string().min(1),
+        baseBranch: z.string().min(1).optional(),
+      }),
+    )
+    .optional(),
 }) satisfies z.ZodType<CreateProjectInput>;
 
 export const taskImageInputSchema = z.object({
@@ -232,6 +252,7 @@ export const createTaskInputSchema = z.object({
   contextPaths: z.array(z.string()).optional(),
   images: z.array(taskImageInputSchema).max(MAX_ATTACHMENTS).optional(),
   branch: z.string().min(1).optional(),
+  repoBranches: z.record(z.string(), z.string().min(1)).optional(),
   workspaceMode: workspaceModeSchema.optional(),
   execution: executionSchema.optional(),
   modelOverrides: modelOverridesSchema.optional(),

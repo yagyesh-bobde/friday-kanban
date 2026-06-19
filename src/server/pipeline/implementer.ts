@@ -24,6 +24,13 @@ import { notify } from "@/server/notify";
 import { wasCanceled } from "./processRegistry";
 import { requireTask, transition } from "./stateMachine";
 import { renderFindingsMarkdown, requireProject, resolveModelSpec } from "./common";
+import {
+  commitAllRepos,
+  isMultiRepo,
+  prepareTaskBranches,
+  projectRepos,
+  repoHeadShas,
+} from "./repos";
 import type { ReviewVerdict } from "@/lib/types";
 
 export interface ImplementOptions {
@@ -105,6 +112,14 @@ export function feedbackFromVerdict(verdict: ReviewVerdict): string {
  */
 async function prepareWorkspace(task: Task): Promise<{ task: Task; cwd: string }> {
   const project = requireProject(task.projectId);
+
+  // Multi-repo: prepare each repo's target branch (per-repo override or the
+  // task default) and run the agent at the parent folder so it can see/edit all
+  // of them. Constrained to branch mode.
+  if (isMultiRepo(project)) {
+    await prepareTaskBranches(projectRepos(project), task);
+    return { task, cwd: project.path };
+  }
 
   if (task.workspaceMode === "worktree") {
     if (task.worktree && (await worktreeIsValid(task.worktree))) {
@@ -188,7 +203,13 @@ export async function runImplementerPhase(
   const sessionId = resume ? priorSessionId : randomUUID();
 
   const spec = resolveModelSpec(task, "in_dev");
-  const baseSha = await headSha(cwd).catch(() => undefined);
+  // Capture the pre-run HEAD(s) so we can list exactly this round's commits.
+  // Multi-repo tracks a base per sub-repo (the parent cwd isn't a git repo).
+  const project = requireProject(task.projectId);
+  const multi = isMultiRepo(project);
+  const repos = projectRepos(project);
+  const baseSha = multi ? undefined : await headSha(cwd).catch(() => undefined);
+  const baseShas = multi ? await repoHeadShas(repos) : null;
 
   task = transition(taskId, isFix ? "fix_started" : "dev_started", {
     payload: { spec, cwd, sessionId },
@@ -230,8 +251,12 @@ export async function runImplementerPhase(
   // Ensure the work is committed (fallback commit if the agent forgot).
   let newShas: string[] = [];
   try {
-    await commitAll(cwd, `friday: ${task.title}`);
-    newShas = baseSha ? await revList(cwd, baseSha, "HEAD") : [];
+    if (multi && baseShas) {
+      newShas = await commitAllRepos(repos, `friday: ${task.title}`, baseShas);
+    } else {
+      await commitAll(cwd, `friday: ${task.title}`);
+      newShas = baseSha ? await revList(cwd, baseSha, "HEAD") : [];
+    }
   } catch (err) {
     const message = `failed to commit implementer work: ${err instanceof Error ? err.message : String(err)}`;
     transition(taskId, "dev_failed", {

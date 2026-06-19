@@ -12,6 +12,7 @@ import type {
   Column,
   CreateProjectInput,
   CreateTaskInput,
+  FsBrowseResult,
   Project,
   ProjectBranches,
   ProjectStatusReport,
@@ -88,7 +89,13 @@ export const api = {
   branches: (projectId: string) =>
     request<ProjectBranches>(`/api/projects/${projectId}/branches`),
   createPr: (projectId: string, branch: string) =>
-    request<BranchPR>(`/api/projects/${projectId}/create-pr`, post({ branch })),
+    request<BranchPR[]>(`/api/projects/${projectId}/create-pr`, post({ branch })),
+
+  // filesystem (Add Project folder picker) -----------------------------------
+  fsBrowse: (dirPath?: string) =>
+    request<FsBrowseResult>(
+      `/api/fs/browse${dirPath ? `?path=${encodeURIComponent(dirPath)}` : ""}`,
+    ),
 
   // tasks ---------------------------------------------------------------
   createTask: (input: CreateTaskInput) =>

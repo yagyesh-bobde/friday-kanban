@@ -34,14 +34,37 @@ export type AgentColumn = "in_dev" | "in_review";
 
 export type Execution = "local" | "cloud";
 
+/**
+ * One git repo inside a multi-repo project. The agent runs at the project's
+ * parent `path` (so it sees every repo at once); branch/commit/PR operations
+ * run per-repo against these roots.
+ */
+export interface ProjectRepo {
+  /** Display name — the repo folder's last path segment, e.g. 'api'. */
+  name: string;
+  /** Absolute path to this repo's git root. */
+  path: string;
+  /** This repo's default base branch, e.g. 'main'. */
+  baseBranch: string;
+}
+
 export interface Project {
   id: string; // ulid
   name: string;
-  /** Absolute path to the local repo root. */
+  /**
+   * Absolute path to the project root. Single-repo: the git repo root.
+   * Multi-repo (`repos` non-empty): the parent folder that contains the repos —
+   * not itself a git repo. Agents run here.
+   */
   path: string;
   /** Branch tasks target by default, e.g. 'main'. */
   baseBranch: string;
   defaultExecution: Execution;
+  /**
+   * When present and non-empty this is a multi-repo project: `path` is a parent
+   * folder and each entry is a git repo under it. Absent/empty = single-repo.
+   */
+  repos?: ProjectRepo[];
   createdAt: string; // ISO 8601
 }
 
@@ -86,8 +109,17 @@ export interface Task {
   prompt: string;
   /** Extra repo files/dirs referenced in the prompt (paths relative to repo root). */
   contextPaths: string[];
-  /** Target branch in the project checkout (defaults to the project's baseBranch). */
+  /**
+   * Target branch in the project checkout (defaults to the project's
+   * baseBranch). For a multi-repo project this is the DEFAULT branch applied to
+   * every repo that has no explicit override in `repoBranches`.
+   */
   branch: string;
+  /**
+   * Multi-repo only: per-repo branch overrides keyed by repo path. A repo not
+   * listed here uses `branch`. Absent for single-repo projects.
+   */
+  repoBranches?: Record<string, string>;
   workspaceMode: WorkspaceMode;
   /** Derived from task_events, denormalized for queries. */
   column: Column;
@@ -211,6 +243,10 @@ export interface BranchPR {
   projectId: string;
   branch: string;
   prUrl: string;
+  /** Multi-repo: absolute path of the sub-repo this PR belongs to. Absent for single-repo. */
+  repoPath?: string;
+  /** Multi-repo: the sub-repo's display name. Absent for single-repo. */
+  repoName?: string;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
 }
@@ -296,6 +332,13 @@ export interface CreateProjectInput {
   path: string;
   baseBranch?: string; // default: detected / 'main'
   defaultExecution?: Execution; // default 'local'
+  /**
+   * Multi-repo: the git repos under `path` to register. When present and
+   * non-empty, `path` is treated as the parent folder (need not be a git repo)
+   * and each repo is validated/branch-detected individually. baseBranch is
+   * detected per-repo on the server when omitted.
+   */
+  repos?: { name: string; path: string; baseBranch?: string }[];
 }
 
 /**
@@ -317,7 +360,9 @@ export interface CreateTaskInput {
   contextPaths?: string[];
   /** Prompt image attachments (local execution only — read by the agent's Read tool). */
   images?: TaskImageInput[];
-  branch?: string; // default: project.baseBranch
+  branch?: string; // default: project.baseBranch (multi-repo: the default applied to all repos)
+  /** Multi-repo only: per-repo branch overrides keyed by repo path. */
+  repoBranches?: Record<string, string>;
   workspaceMode?: WorkspaceMode; // default 'branch'
   execution?: Execution; // default: project.defaultExecution
   modelOverrides?: Partial<Record<AgentColumn, ModelSpec>>;
@@ -349,12 +394,47 @@ export interface TaskDetail {
   verdicts: ReviewVerdict[];
 }
 
+/** One subdirectory entry returned by the directory browser. */
+export interface FsEntry {
+  /** Folder name (last path segment). */
+  name: string;
+  /** Absolute path. */
+  path: string;
+  /** True when the folder is a git repo (has a .git entry). */
+  isGitRepo: boolean;
+}
+
+/** GET /api/fs/browse response shape — used by the Add Project folder picker. */
+export interface FsBrowseResult {
+  /** Resolved absolute path being listed. */
+  path: string;
+  /** Parent directory, or null at the filesystem root. */
+  parent: string | null;
+  /** The user's home directory (a handy starting point in the UI). */
+  home: string;
+  /** True when `path` itself is a git repo. */
+  isGitRepo: boolean;
+  /** Subdirectories of `path`, sorted; git repos flagged. */
+  entries: FsEntry[];
+}
+
+/** Per-repo branch list (multi-repo projects only). */
+export interface RepoBranches {
+  /** Absolute repo path (matches Project.repos[].path / Task.repoBranches keys). */
+  path: string;
+  name: string;
+  branches: string[];
+  current: string;
+}
+
 /** GET /api/projects/[id]/branches response shape. */
 export interface ProjectBranches {
-  /** Local branch names, e.g. ['main', 'feat/x']. */
+  /** Local branch names; for multi-repo this is the UNION across repos. */
   branches: string[];
-  /** Currently checked-out branch in the project checkout. */
+  /** Currently checked-out branch (first repo for multi-repo). */
   current: string;
+  /** Multi-repo only: per-repo branch lists for per-repo branch selection. */
+  repos?: RepoBranches[];
 }
 
 /** Standard error envelope returned by all API routes on failure. */

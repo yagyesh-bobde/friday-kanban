@@ -41,8 +41,8 @@ export async function POST(
   }
 
   try {
-    const branchPr = await getOrchestrator().createPrForProject(id, branch);
-    return Response.json(branchPr);
+    const branchPrs = await getOrchestrator().createPrForProject(id, branch);
+    return Response.json(branchPrs);
   } catch (err) {
     return handleRouteError(err);
   }
