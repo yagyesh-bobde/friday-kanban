@@ -29,6 +29,7 @@ import { TaskCardBody } from "./TaskCard";
 import { StatusPane } from "@/components/StatusPane";
 import { Toasts } from "@/components/ui/Toasts";
 import { NewTaskModal } from "@/components/modals/NewTaskModal";
+import { QuickCreateModal } from "@/components/modals/QuickCreateModal";
 import { AddProjectModal } from "@/components/modals/AddProjectModal";
 import { SendBackDialog } from "@/components/modals/SendBackDialog";
 import { TaskDrawer } from "@/components/task/TaskDrawer";
@@ -156,10 +157,32 @@ export default function BoardApp() {
   const loadError = useBoard((s) => s.loadError);
   const hasProjects = useBoard((s) => s.projects.length > 0);
   const boardView = useUi((s) => s.boardView);
+  const openQuickCreate = useUi((s) => s.openQuickCreate);
+  const anyModalOpen = useUi(
+    (s) =>
+      s.quickCreateOpen ||
+      s.newTaskOpen ||
+      s.addProjectOpen ||
+      s.sendBackTaskId !== null ||
+      s.drawerTaskId !== null,
+  );
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  useEffect(() => {
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    const onKey = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (!anyModalOpen) openQuickCreate();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyModalOpen, openQuickCreate]);
 
   return (
     <div className="board-grid flex h-screen flex-col overflow-hidden">
@@ -196,6 +219,7 @@ export default function BoardApp() {
       {/* overlays */}
       <TaskDrawer />
       <NewTaskModal />
+      <QuickCreateModal />
       <AddProjectModal />
       <SendBackDialog />
       <Toasts />

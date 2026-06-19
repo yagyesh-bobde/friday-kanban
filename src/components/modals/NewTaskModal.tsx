@@ -74,6 +74,7 @@ function specsEqual(a: ModelSpec, b: ModelSpec): boolean {
 export function NewTaskModal() {
   const open = useUi((s) => s.newTaskOpen);
   const prefillProjectId = useUi((s) => s.newTaskProjectId);
+  const prefillPrompt = useUi((s) => s.newTaskInitialPrompt);
   const close = useUi((s) => s.closeNewTask);
   const toast = useUi((s) => s.toast);
   const projects = useBoard((s) => s.projects);
@@ -109,7 +110,7 @@ export function NewTaskModal() {
     const initial = prefillProjectId ?? projects[0]?.id ?? "";
     setProjectId(initial);
     setTitle("");
-    setPrompt("");
+    setPrompt(prefillPrompt ?? "");
     setContextPaths([]);
     setScopePaths([]);
     setImages([]);
