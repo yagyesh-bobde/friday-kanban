@@ -38,6 +38,14 @@ interface UiStore {
   openQuickCreate: () => void;
   closeQuickCreate: () => void;
 
+  // full-page settings view (Cmd+P / Ctrl+P)
+  settingsOpen: boolean;
+  /** Active settings section id (see settings/registry.tsx). */
+  settingsSection: string;
+  openSettings: (section?: string) => void;
+  closeSettings: () => void;
+  setSettingsSection: (section: string) => void;
+
   // add project modal
   addProjectOpen: boolean;
   openAddProject: () => void;
@@ -78,6 +86,13 @@ export const useUi = create<UiStore>()((set, get) => ({
   quickCreateOpen: false,
   openQuickCreate: () => set({ quickCreateOpen: true }),
   closeQuickCreate: () => set({ quickCreateOpen: false }),
+
+  settingsOpen: false,
+  settingsSection: "agents",
+  openSettings: (section) =>
+    set(section ? { settingsOpen: true, settingsSection: section } : { settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
+  setSettingsSection: (section) => set({ settingsSection: section }),
 
   addProjectOpen: false,
   openAddProject: () => set({ addProjectOpen: true }),

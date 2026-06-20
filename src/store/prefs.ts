@@ -1,9 +1,10 @@
 /**
- * Per-user cosmetic preferences, persisted to localStorage.
+ * Per-user client preferences, persisted to localStorage.
  *
- * Deliberately separate from the board/ui stores: these are local-only vibes
+ * Deliberately separate from the board/ui stores: these are local-only settings
  * that never hit the server and shouldn't ride along with SSE churn or modal
- * state. Currently just the fire animation toggle.
+ * state. Holds cosmetic toggles (fire vibes) plus per-browser feature-flag
+ * overrides (see src/lib/featureFlags.ts for the flag registry).
  */
 
 import { create } from "zustand";
@@ -13,6 +14,15 @@ interface PrefsStore {
   /** Render the full-width fire lottie at the bottom of the screen. */
   fireVibes: boolean;
   setFireVibes: (on: boolean) => void;
+
+  /**
+   * Per-flag overrides keyed by FeatureFlag id. A missing key means "use the
+   * flag's registry default"; resolve through `useFeatureFlag` rather than
+   * reading this map directly.
+   */
+  featureFlags: Record<string, boolean>;
+  setFeatureFlag: (id: string, on: boolean) => void;
+  resetFeatureFlag: (id: string) => void;
 }
 
 export const usePrefs = create<PrefsStore>()(
@@ -20,6 +30,16 @@ export const usePrefs = create<PrefsStore>()(
     (set) => ({
       fireVibes: false,
       setFireVibes: (on) => set({ fireVibes: on }),
+
+      featureFlags: {},
+      setFeatureFlag: (id, on) =>
+        set((s) => ({ featureFlags: { ...s.featureFlags, [id]: on } })),
+      resetFeatureFlag: (id) =>
+        set((s) => {
+          const next = { ...s.featureFlags };
+          delete next[id];
+          return { featureFlags: next };
+        }),
     }),
     { name: "friday-prefs" },
   ),

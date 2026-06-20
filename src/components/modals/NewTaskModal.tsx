@@ -34,7 +34,7 @@ import {
   IconX,
   Spinner,
 } from "@/components/ui/icons";
-import { ModelSpecEditor } from "@/components/settings/SettingsPopover";
+import { ModelSpecEditor } from "@/components/settings/ModelSpecEditor";
 import { cn } from "@/components/util";
 
 const NEW_BRANCH = "__new__";

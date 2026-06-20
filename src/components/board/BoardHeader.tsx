@@ -5,13 +5,23 @@
  * cap (PUT /api/config), Create PR menu, settings, Add Project, New Task.
  */
 
+import { useEffect, useState } from "react";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
+import { useFeatureFlag } from "@/lib/featureFlags";
 import { cn, isPastTask } from "@/components/util";
 import { Segmented, Stepper } from "@/components/ui/fields";
-import { IconPlus, IconSpark } from "@/components/ui/icons";
+import { IconGear, IconPlus, IconSpark } from "@/components/ui/icons";
 import { CreatePrMenu } from "./CreatePrMenu";
-import { SettingsPopover } from "@/components/settings/SettingsPopover";
+
+/** ⌘ on macOS, Ctrl elsewhere. Resolved after mount to avoid SSR mismatch. */
+function useModKey() {
+  const [mod, setMod] = useState("⌘");
+  useEffect(() => {
+    setMod(/Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌘" : "Ctrl");
+  }, []);
+  return mod;
+}
 
 export function BoardHeader() {
   const config = useBoard((s) => s.config);
@@ -23,8 +33,11 @@ export function BoardHeader() {
   );
   const openNewTask = useUi((s) => s.openNewTask);
   const openAddProject = useUi((s) => s.openAddProject);
+  const openSettings = useUi((s) => s.openSettings);
   const boardView = useUi((s) => s.boardView);
   const setBoardView = useUi((s) => s.setBoardView);
+  const keyboardHints = useFeatureFlag("keyboardHints");
+  const mod = useModKey();
 
   return (
     <header className="relative z-40 flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
@@ -111,8 +124,24 @@ export function BoardHeader() {
 
       <div className="mx-1 h-5 w-px bg-edge" />
 
+      {keyboardHints ? (
+        <span className="hidden items-center gap-1.5 text-[11px] text-faint lg:flex">
+          <kbd>{mod}K</kbd>
+          <span>create</span>
+          <kbd>{mod}P</kbd>
+          <span>settings</span>
+        </span>
+      ) : null}
+
       <CreatePrMenu />
-      <SettingsPopover />
+      <button
+        onClick={() => openSettings()}
+        className="rounded-md border border-edge p-[7px] text-mute transition-colors hover:border-edge-bright hover:text-ink"
+        title={`Settings (${mod}P)`}
+        aria-label="Settings"
+      >
+        <IconGear size={14} />
+      </button>
 
       <div className="mx-1 h-5 w-px bg-edge" />
 

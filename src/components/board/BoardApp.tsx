@@ -33,6 +33,7 @@ import { QuickCreateModal } from "@/components/modals/QuickCreateModal";
 import { AddProjectModal } from "@/components/modals/AddProjectModal";
 import { SendBackDialog } from "@/components/modals/SendBackDialog";
 import { TaskDrawer } from "@/components/task/TaskDrawer";
+import { SettingsView } from "@/components/settings/SettingsView";
 import { FireVibes } from "@/components/effects/FireVibes";
 import { IconFolder, IconSpark, Spinner } from "@/components/ui/icons";
 import { Button } from "@/components/ui/fields";
@@ -158,6 +159,9 @@ export default function BoardApp() {
   const hasProjects = useBoard((s) => s.projects.length > 0);
   const boardView = useUi((s) => s.boardView);
   const openQuickCreate = useUi((s) => s.openQuickCreate);
+  const settingsOpen = useUi((s) => s.settingsOpen);
+  const openSettings = useUi((s) => s.openSettings);
+  const closeSettings = useUi((s) => s.closeSettings);
   const anyModalOpen = useUi(
     (s) =>
       s.quickCreateOpen ||
@@ -175,14 +179,21 @@ export default function BoardApp() {
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
     const onKey = (e: KeyboardEvent) => {
       const mod = isMac ? e.metaKey : e.ctrlKey;
-      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+      if (!mod || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "k") {
         e.preventDefault();
-        if (!anyModalOpen) openQuickCreate();
+        if (!anyModalOpen && !settingsOpen) openQuickCreate();
+      } else if (key === "p") {
+        // Cmd/Ctrl+P toggles the full-page settings view.
+        e.preventDefault();
+        if (settingsOpen) closeSettings();
+        else if (!anyModalOpen) openSettings();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [anyModalOpen, openQuickCreate]);
+  }, [anyModalOpen, settingsOpen, openQuickCreate, openSettings, closeSettings]);
 
   return (
     <div className="board-grid flex h-screen flex-col overflow-hidden">
@@ -217,6 +228,7 @@ export default function BoardApp() {
       <StatusPane />
 
       {/* overlays */}
+      <SettingsView />
       <TaskDrawer />
       <NewTaskModal />
       <QuickCreateModal />
