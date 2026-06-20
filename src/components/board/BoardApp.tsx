@@ -21,6 +21,7 @@ import type { Column as ColumnId, Task } from "@/lib/types";
 import { COLUMNS } from "@/lib/constants";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
+import { usePrefs } from "@/store/prefs";
 import { isPastTask, legalTargetsFor } from "@/components/util";
 import { BoardHeader } from "./BoardHeader";
 import { BoardColumn } from "./Column";
@@ -173,6 +174,9 @@ export default function BoardApp() {
 
   useEffect(() => {
     void init();
+    // Honor the "auto-enable fire vibes" preference on every app init.
+    const prefs = usePrefs.getState();
+    if (prefs.autoFireVibes) prefs.setFireVibes(true);
   }, [init]);
 
   useEffect(() => {

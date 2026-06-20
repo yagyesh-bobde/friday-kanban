@@ -15,6 +15,10 @@ interface PrefsStore {
   fireVibes: boolean;
   setFireVibes: (on: boolean) => void;
 
+  /** When true, fire vibes are switched on automatically on app init. */
+  autoFireVibes: boolean;
+  setAutoFireVibes: (on: boolean) => void;
+
   /**
    * Per-flag overrides keyed by FeatureFlag id. A missing key means "use the
    * flag's registry default"; resolve through `useFeatureFlag` rather than
@@ -30,6 +34,9 @@ export const usePrefs = create<PrefsStore>()(
     (set) => ({
       fireVibes: false,
       setFireVibes: (on) => set({ fireVibes: on }),
+
+      autoFireVibes: false,
+      setAutoFireVibes: (on) => set({ autoFireVibes: on }),
 
       featureFlags: {},
       setFeatureFlag: (id, on) =>
