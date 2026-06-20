@@ -28,6 +28,13 @@ import { withKeyedLock } from "./mutex";
 import { matchesScope } from "./scope";
 import { requireTask, transition } from "./stateMachine";
 import { renderFindingsMarkdown, requireProject, resolveModelSpec } from "./common";
+import {
+  commitAllRepos,
+  isMultiRepo,
+  prepareTaskBranches,
+  projectRepos,
+  repoHeadShas,
+} from "./repos";
 import type { ReviewVerdict } from "@/lib/types";
 
 export interface ImplementOptions {
@@ -133,6 +140,14 @@ export function feedbackFromVerdict(verdict: ReviewVerdict): string {
 async function prepareWorkspace(task: Task): Promise<{ task: Task; cwd: string }> {
   const project = requireProject(task.projectId);
 
+  // Multi-repo: prepare each repo's target branch (per-repo override or the
+  // task default) and run the agent at the parent folder so it can see/edit all
+  // of them. Constrained to branch mode.
+  if (isMultiRepo(project)) {
+    await prepareTaskBranches(projectRepos(project), task);
+    return { task, cwd: project.path };
+  }
+
   if (task.workspaceMode === "worktree") {
     if (task.worktree && (await worktreeIsValid(task.worktree))) {
       return { task, cwd: task.worktree.path };
@@ -221,7 +236,13 @@ export async function runImplementerPhase(
   const sessionId = resume ? priorSessionId : randomUUID();
 
   const spec = resolveModelSpec(task, "in_dev");
-  const baseSha = await headSha(cwd).catch(() => undefined);
+  // Capture the pre-run HEAD(s) so we can list exactly this round's commits.
+  // Multi-repo tracks a base per sub-repo (the parent cwd isn't a git repo).
+  const project = requireProject(task.projectId);
+  const multi = isMultiRepo(project);
+  const repos = projectRepos(project);
+  const baseSha = multi ? undefined : await headSha(cwd).catch(() => undefined);
+  const baseShas = multi ? await repoHeadShas(repos) : null;
 
   task = transition(taskId, isFix ? "fix_started" : "dev_started", {
     payload: { spec, cwd, sessionId },
@@ -278,7 +299,10 @@ export async function runImplementerPhase(
   let newShas: string[] = [];
   try {
     const message = `friday: ${task.title}`;
-    if (task.scopePaths.length > 0) {
+    if (multi && baseShas) {
+      // Multi-repo: commit across every sub-repo (scoping not applied here).
+      newShas = await commitAllRepos(repos, message, baseShas);
+    } else if (task.scopePaths.length > 0) {
       const lockKey = branchLockKey(task);
       const doCommit = async (): Promise<void> => {
         const pre = (await headSha(cwd).catch(() => undefined)) ?? baseSha;

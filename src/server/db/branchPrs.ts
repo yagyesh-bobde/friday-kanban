@@ -12,6 +12,8 @@ interface BranchPrRow {
   project_id: string;
   branch: string;
   pr_url: string;
+  repo_path: string;
+  repo_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -22,15 +24,21 @@ function rowToBranchPr(row: BranchPrRow): BranchPR {
     projectId: row.project_id,
     branch: row.branch,
     prUrl: row.pr_url,
+    ...(row.repo_path ? { repoPath: row.repo_path } : {}),
+    ...(row.repo_name ? { repoName: row.repo_name } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export function getBranchPr(projectId: string, branch: string): BranchPR | undefined {
+export function getBranchPr(
+  projectId: string,
+  branch: string,
+  repoPath = "",
+): BranchPR | undefined {
   const row = getDb()
-    .prepare(`SELECT * FROM branch_prs WHERE project_id = ? AND branch = ?`)
-    .get(projectId, branch) as BranchPrRow | undefined;
+    .prepare(`SELECT * FROM branch_prs WHERE project_id = ? AND branch = ? AND repo_path = ?`)
+    .get(projectId, branch, repoPath) as BranchPrRow | undefined;
   return row ? rowToBranchPr(row) : undefined;
 }
 
@@ -46,31 +54,43 @@ export function listBranchPrsByProject(projectId: string): BranchPR[] {
   return rows.map(rowToBranchPr);
 }
 
-/** Insert or refresh the PR record for (project, branch). */
-export function upsertBranchPr(projectId: string, branch: string, prUrl: string): BranchPR {
+/**
+ * Insert or refresh the PR record for (project, branch, repo). `repoPath`/
+ * `repoName` are set only for multi-repo projects; single-repo callers omit
+ * them (stored as '').
+ */
+export function upsertBranchPr(
+  projectId: string,
+  branch: string,
+  prUrl: string,
+  repoPath = "",
+  repoName = "",
+): BranchPR {
   const now = nowIso();
-  const existing = getBranchPr(projectId, branch);
+  const existing = getBranchPr(projectId, branch, repoPath);
   if (existing) {
     getDb()
       .prepare(`UPDATE branch_prs SET pr_url = ?, updated_at = ? WHERE id = ?`)
       .run(prUrl, now, existing.id);
     return { ...existing, prUrl, updatedAt: now };
   }
-  const pr: BranchPR = {
-    id: ulid(),
+  const id = ulid();
+  getDb()
+    .prepare(
+      `INSERT INTO branch_prs (id, project_id, branch, pr_url, repo_path, repo_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, projectId, branch, prUrl, repoPath, repoName, now, now);
+  return {
+    id,
     projectId,
     branch,
     prUrl,
+    ...(repoPath ? { repoPath } : {}),
+    ...(repoName ? { repoName } : {}),
     createdAt: now,
     updatedAt: now,
   };
-  getDb()
-    .prepare(
-      `INSERT INTO branch_prs (id, project_id, branch, pr_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(pr.id, pr.projectId, pr.branch, pr.prUrl, pr.createdAt, pr.updatedAt);
-  return pr;
 }
 
 export function deleteBranchPr(id: string): boolean {

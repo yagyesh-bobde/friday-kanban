@@ -54,7 +54,7 @@ interface BoardStore {
   createTask: (input: CreateTaskInput) => Promise<Task>;
   createProject: (input: CreateProjectInput) => Promise<Project>;
   updateConfig: (patch: UpdateConfigInput) => Promise<void>;
-  createPr: (projectId: string, branch: string) => Promise<BranchPR>;
+  createPr: (projectId: string, branch: string) => Promise<BranchPR[]>;
   loadStatusReports: () => Promise<void>;
 }
 
@@ -301,16 +301,13 @@ export const useBoard = create<BoardStore>()((set, get) => ({
   },
 
   createPr: async (projectId, branch) => {
-    const pr = await api.createPr(projectId, branch);
+    const prs = await api.createPr(projectId, branch);
     set((s) => {
-      const exists = s.branchPrs.some((b) => b.id === pr.id);
-      return {
-        branchPrs: exists
-          ? s.branchPrs.map((b) => (b.id === pr.id ? pr : b))
-          : [...s.branchPrs, pr],
-      };
+      const byId = new Map(s.branchPrs.map((b) => [b.id, b]));
+      for (const pr of prs) byId.set(pr.id, pr);
+      return { branchPrs: [...byId.values()] };
     });
-    return pr;
+    return prs;
   },
 
   loadStatusReports: async () => {

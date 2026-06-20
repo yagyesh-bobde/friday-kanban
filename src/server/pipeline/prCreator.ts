@@ -8,11 +8,12 @@
 import type { BranchPR, ReviewVerdict, Task, TaskEvent } from "@/lib/types";
 import { upsertBranchPr } from "@/server/db/branchPrs";
 import { listTaskEvents, listTasksByProject } from "@/server/db/tasks";
-import { prCreate, prEditBody, prList, push } from "@/server/git";
+import { branchExists, hasRemote, prCreate, prEditBody, prList, push, revList } from "@/server/git";
 import { publish } from "@/server/bus";
 import { notify } from "@/server/notify";
 import { InvalidTransitionError, transition } from "./stateMachine";
 import { requireProject } from "./common";
+import { isMultiRepo, projectRepos, taskBranchForRepo } from "./repos";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -87,9 +88,10 @@ function collectBundle(projectId: string, branch: string): TaskBundle[] {
   });
 }
 
-function buildPrBody(bundles: TaskBundle[], branch: string): string {
+function buildPrBody(bundles: TaskBundle[], branch: string, repoName?: string): string {
+  const scope = repoName ? `${repoName} · \`${branch}\`` : `\`${branch}\``;
   const lines: string[] = [
-    `Bundled changes from ${bundles.length} friday-kanban task(s) on \`${branch}\`.`,
+    `Bundled changes from ${bundles.length} friday-kanban task(s) on ${scope}.`,
     "",
   ];
   for (const { task, summary, nonBlockingFindings } of bundles) {
@@ -117,13 +119,64 @@ function buildPrBody(bundles: TaskBundle[], branch: string): string {
 }
 
 /**
- * Create (or update) the bundled PR for (project, branch). Throws
- * InvalidTransitionError when the branch has no done tasks to bundle.
+ * Push `branch` and create/refresh ONE PR in a single repo, then upsert +
+ * publish its BranchPR record. `repoName` is passed only for multi-repo
+ * projects (it scopes the PR record/title); single-repo callers omit it.
+ */
+async function createPrForRepo(
+  repoPath: string,
+  projectId: string,
+  branch: string,
+  baseBranch: string,
+  bundles: TaskBundle[],
+  repoName?: string,
+): Promise<BranchPR> {
+  // Push the branch (new commits flow into any open PR automatically).
+  await push(repoPath, branch);
+
+  // Reuse the open PR for this head if one exists, else create.
+  const openPrs = await prList(repoPath, { head: branch, state: "open" });
+  const existing = openPrs[0];
+
+  let prUrl: string;
+  const body = buildPrBody(bundles, branch, repoName);
+  if (existing) {
+    prUrl = existing.url;
+    // Refresh the body so newly bundled tasks are described too.
+    await prEditBody(repoPath, existing.number, body).catch((err: unknown) => {
+      console.warn(`[prCreator] gh pr edit failed (non-fatal): ${String(err)}`);
+    });
+  } else {
+    const first = bundles[0];
+    const single = bundles.length === 1 && first;
+    const title = single
+      ? repoName
+        ? `${first.task.title} (${repoName})`
+        : first.task.title
+      : `friday: ${repoName ? `${repoName} · ` : ""}${branch} (${bundles.length} tasks)`;
+    prUrl = await prCreate(repoPath, {
+      title,
+      body,
+      head: branch,
+      base: baseBranch !== branch ? baseBranch : undefined,
+    });
+  }
+
+  const branchPr = upsertBranchPr(projectId, branch, prUrl, repoName ? repoPath : "", repoName ?? "");
+  publish({ type: "branch_pr_updated", branchPr });
+  return branchPr;
+}
+
+/**
+ * Create (or update) the bundled PR(s) for (project, branch). Single-repo
+ * projects produce one PR; multi-repo projects produce one PR per sub-repo
+ * that has commits on the branch. Throws InvalidTransitionError when the
+ * branch has no done tasks to bundle (or no sub-repo changed).
  */
 export async function createPrForProjectBranch(
   projectId: string,
   branch: string,
-): Promise<BranchPR> {
+): Promise<BranchPR[]> {
   const project = requireProject(projectId);
   const bundles = collectBundle(projectId, branch);
 
@@ -132,43 +185,69 @@ export async function createPrForProjectBranch(
   }
   const newBundles = bundles.filter((b) => !b.alreadyInPr);
 
-  // 1. Push the branch (new commits flow into any open PR automatically).
-  await push(project.path, branch);
-
-  // 2. Reuse the open PR for this head if one exists, else create.
-  const openPrs = await prList(project.path, { head: branch, state: "open" });
-  const existing = openPrs[0];
-
-  let prUrl: string;
-  const body = buildPrBody(bundles, branch);
-  if (existing) {
-    prUrl = existing.url;
-    // Refresh the body so newly bundled tasks are described too.
-    await prEditBody(project.path, existing.number, body).catch((err: unknown) => {
-      console.warn(`[prCreator] gh pr edit failed (non-fatal): ${String(err)}`);
-    });
-  } else {
-    const first = bundles[0];
-    const title =
-      bundles.length === 1 && first
-        ? first.task.title
-        : `friday: ${branch} (${bundles.length} tasks)`;
-    prUrl = await prCreate(project.path, {
-      title,
-      body,
-      head: branch,
-      base: project.baseBranch !== branch ? project.baseBranch : undefined,
-    });
+  // Single-repo: one PR against the project root (unchanged behavior).
+  if (!isMultiRepo(project)) {
+    const branchPr = await createPrForRepo(
+      project.path,
+      projectId,
+      branch,
+      project.baseBranch,
+      bundles,
+    );
+    for (const { task } of newBundles) {
+      transition(task.id, "pr_created", { payload: { prUrl: branchPr.prUrl, branch } });
+    }
+    notify("friday-kanban: PR ready", `${project.name}:${branch} → ${branchPr.prUrl}`);
+    return [branchPr];
   }
 
-  // 3. Record pr_created on each newly bundled task.
+  // Multi-repo: each task may target a different branch per repo. For every
+  // repo, bundle the done tasks by the branch they target THERE, and open one
+  // PR per (repo, branch) that actually has commits ahead of that repo's base.
+  const created: BranchPR[] = [];
+  const skipped: string[] = [];
+  for (const repo of projectRepos(project)) {
+    const byBranch = new Map<string, TaskBundle[]>();
+    for (const b of bundles) {
+      const rb = taskBranchForRepo(b.task, repo.path);
+      const group = byBranch.get(rb) ?? [];
+      group.push(b);
+      byBranch.set(rb, group);
+    }
+    for (const [rb, group] of byBranch) {
+      try {
+        // Can't open a PR from a branch onto itself.
+        if (rb === repo.baseBranch) continue;
+        if (!(await branchExists(repo.path, rb))) continue;
+        const ahead = await revList(repo.path, repo.baseBranch, rb).catch(() => [] as string[]);
+        if (ahead.length === 0) continue; // nothing changed on this branch in this repo
+        if (!(await hasRemote(repo.path))) {
+          skipped.push(`${repo.name}#${rb}: no git remote`);
+          continue;
+        }
+        created.push(
+          await createPrForRepo(repo.path, projectId, rb, repo.baseBranch, group, repo.name),
+        );
+      } catch (err) {
+        skipped.push(`${repo.name}#${rb}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  if (created.length === 0) {
+    throw new InvalidTransitionError(
+      `No sub-repo of ${project.name} had changes on ${branch} to open a PR` +
+        (skipped.length ? ` (${skipped.join("; ")})` : ""),
+    );
+  }
+
   for (const { task } of newBundles) {
-    transition(task.id, "pr_created", { payload: { prUrl, branch } });
+    transition(task.id, "pr_created", {
+      payload: { prUrls: created.map((p) => p.prUrl), branch },
+    });
   }
-
-  // 4. Upsert + publish the BranchPR record.
-  const branchPr = upsertBranchPr(projectId, branch, prUrl);
-  publish({ type: "branch_pr_updated", branchPr });
-  notify("friday-kanban: PR ready", `${project.name}:${branch} → ${prUrl}`);
-  return branchPr;
+  const summary = created.map((p) => `${p.repoName} → ${p.prUrl}`).join("  ·  ");
+  const suffix = skipped.length ? ` (skipped ${skipped.length})` : "";
+  notify("friday-kanban: PRs ready", `${project.name}:${branch} — ${summary}${suffix}`);
+  return created;
 }

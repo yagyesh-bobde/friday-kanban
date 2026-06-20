@@ -13,6 +13,7 @@ import type {
   CreateTaskInput,
   Execution,
   ModelSpec,
+  RepoBranches,
   TaskImageInput,
   WorkspaceMode,
 } from "@/lib/types";
@@ -38,6 +39,8 @@ import { ModelSpecEditor } from "@/components/settings/ModelSpecEditor";
 import { cn } from "@/components/util";
 
 const NEW_BRANCH = "__new__";
+/** Per-repo branch sentinel: follow the task's default branch. */
+const FOLLOW_DEFAULT = "";
 
 /** Read a File into a `data:<mime>;base64,...` URL via FileReader. */
 function fileToDataUrl(file: File): Promise<string> {
@@ -98,11 +101,19 @@ export function NewTaskModal() {
 
   const [branches, setBranches] = useState<string[] | null>(null);
   const [branchesError, setBranchesError] = useState<string | null>(null);
+  // Multi-repo: per-repo branch lists + the user's per-repo choices.
+  const [branchRepos, setBranchRepos] = useState<RepoBranches[] | null>(null);
+  const [repoChoices, setRepoChoices] = useState<Record<string, string>>({});
+  const [repoNewBranch, setRepoNewBranch] = useState<Record<string, string>>({});
+  const [repoBranchOpen, setRepoBranchOpen] = useState(false);
 
   const project = useMemo(
     () => projects.find((p) => p.id === projectId),
     [projects, projectId],
   );
+  // Multi-repo projects run a single agent across all sub-repos: branch mode +
+  // local execution only (worktrees/cloud assume one git root).
+  const isMulti = !!project?.repos && project.repos.length > 0;
 
   // reset when (re)opened
   useEffect(() => {
@@ -118,6 +129,9 @@ export function NewTaskModal() {
     setWorkspaceMode("branch");
     setModelsOpen(false);
     setSpecs(config.columnDefaults);
+    setRepoChoices({});
+    setRepoNewBranch({});
+    setRepoBranchOpen(false);
     setSubmitting(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -129,12 +143,17 @@ export function NewTaskModal() {
     setBranchChoice(project.baseBranch);
     setBranches(null);
     setBranchesError(null);
+    setBranchRepos(null);
+    setRepoChoices({});
+    setRepoNewBranch({});
+    setRepoBranchOpen(false);
     let live = true;
     api
       .branches(project.id)
       .then((res) => {
         if (!live) return;
         setBranches(res.branches);
+        setBranchRepos(res.repos ?? null);
         // default to the project baseBranch when present, else current
         setBranchChoice(
           res.branches.includes(project.baseBranch) ? project.baseBranch : res.current,
@@ -181,8 +200,42 @@ export function NewTaskModal() {
 
   const effectiveBranch =
     branchChoice === NEW_BRANCH ? newBranchName.trim() : branchChoice;
+
+  // Per-repo branch overrides (multi-repo): a repo "follows" the default branch
+  // unless the user picked a specific or brand-new branch for it. Only repos
+  // that actually differ from the default end up in the override map.
+  const repoOverrides = useMemo<Record<string, string>>(() => {
+    if (!isMulti || !branchRepos) return {};
+    const out: Record<string, string> = {};
+    for (const repo of branchRepos) {
+      const choice = repoChoices[repo.path] ?? FOLLOW_DEFAULT;
+      const eff =
+        choice === FOLLOW_DEFAULT
+          ? effectiveBranch
+          : choice === NEW_BRANCH
+            ? (repoNewBranch[repo.path] ?? "").trim()
+            : choice;
+      if (eff && eff !== effectiveBranch) out[repo.path] = eff;
+    }
+    return out;
+  }, [isMulti, branchRepos, repoChoices, repoNewBranch, effectiveBranch]);
+
+  // A repo set to "+ New branch…" with an empty name blocks submission.
+  const repoBranchIncomplete =
+    isMulti && branchRepos
+      ? branchRepos.some(
+          (r) =>
+            (repoChoices[r.path] ?? FOLLOW_DEFAULT) === NEW_BRANCH &&
+            !(repoNewBranch[r.path] ?? "").trim(),
+        )
+      : false;
+
   const canSubmit =
-    !!project && title.trim() !== "" && prompt.trim() !== "" && effectiveBranch !== "";
+    !!project &&
+    title.trim() !== "" &&
+    prompt.trim() !== "" &&
+    effectiveBranch !== "" &&
+    !repoBranchIncomplete;
 
   const submit = async (startNow: boolean) => {
     if (!canSubmit || !project || submitting) return;
@@ -203,6 +256,7 @@ export function NewTaskModal() {
       ...(scopePaths.length > 0 ? { scopePaths } : {}),
       ...(images.length > 0 ? { images } : {}),
       branch: effectiveBranch,
+      ...(Object.keys(repoOverrides).length > 0 ? { repoBranches: repoOverrides } : {}),
       workspaceMode,
       execution,
       ...(Object.keys(overrides).length > 0 ? { modelOverrides: overrides } : {}),
@@ -324,9 +378,91 @@ export function NewTaskModal() {
               {branchesError ? (
                 <p className="text-[11px] text-danger">{branchesError}</p>
               ) : null}
+              {isMulti ? (
+                <p className="text-[11px] leading-snug text-faint">
+                  Default for every repo — created from each repo&apos;s base branch where it
+                  doesn&apos;t exist. Override per repo below.
+                </p>
+              ) : null}
             </div>
           </Field>
         </div>
+
+        {/* per-repo branch overrides (multi-repo) */}
+        {isMulti && branchRepos && branchRepos.length > 0 ? (
+          <div className="rounded-lg border border-edge">
+            <button
+              type="button"
+              onClick={() => setRepoBranchOpen((v) => !v)}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+            >
+              {repoBranchOpen ? (
+                <IconChevronDown size={12} className="text-faint" />
+              ) : (
+                <IconChevronRight size={12} className="text-faint" />
+              )}
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mute">
+                Per-repo branches
+              </span>
+              <span className="font-mono text-[10.5px] text-faint">
+                {Object.keys(repoOverrides).length === 0
+                  ? `all on ${effectiveBranch || "default"}`
+                  : `${Object.keys(repoOverrides).length} override${
+                      Object.keys(repoOverrides).length === 1 ? "" : "s"
+                    }`}
+              </span>
+            </button>
+            <div className={cn("space-y-2.5 px-3 pb-3", !repoBranchOpen && "hidden")}>
+              {branchRepos.map((repo) => {
+                const choice = repoChoices[repo.path] ?? FOLLOW_DEFAULT;
+                return (
+                  <div
+                    key={repo.path}
+                    className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] items-start gap-2"
+                  >
+                    <span
+                      className="truncate pt-1.5 text-[12px] font-medium text-ink"
+                      title={repo.path}
+                    >
+                      {repo.name}
+                    </span>
+                    <div className="space-y-1.5">
+                      <Select
+                        value={choice}
+                        onChange={(e) =>
+                          setRepoChoices((s) => ({ ...s, [repo.path]: e.target.value }))
+                        }
+                      >
+                        <option value={FOLLOW_DEFAULT}>
+                          follow default ({effectiveBranch || "default"})
+                        </option>
+                        {repo.branches.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
+                        <option value={NEW_BRANCH}>+ New branch…</option>
+                      </Select>
+                      {choice === NEW_BRANCH ? (
+                        <Input
+                          placeholder="feat/my-branch"
+                          value={repoNewBranch[repo.path] ?? ""}
+                          onChange={(e) =>
+                            setRepoNewBranch((s) => ({ ...s, [repo.path]: e.target.value }))
+                          }
+                          className="font-mono text-[12px]"
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-[11px] leading-snug text-faint">
+                Each repo commits to its own branch; PRs open per repo against that repo&apos;s base.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {/* title */}
         <Field label="Title">
@@ -450,40 +586,51 @@ export function NewTaskModal() {
         </Field>
 
         {/* workspace + execution */}
-        <div className="grid grid-cols-2 gap-3">
+        {isMulti ? (
           <Field label="Workspace">
-            <div className="space-y-1.5">
-              <Select
-                value={workspaceMode}
-                onChange={(e) => setWorkspaceMode(e.target.value as WorkspaceMode)}
-              >
-                {WORKSPACE_OPTIONS.map((w) => (
-                  <option key={w.value} value={w.value}>
-                    {w.label}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-[11px] leading-snug text-faint">{workspaceHint}</p>
-            </div>
+            <p className="rounded-md border border-edge bg-raised px-3 py-2.5 text-[11px] leading-relaxed text-faint">
+              Multi-repo project — the agent runs from the parent folder across all{" "}
+              {project?.repos?.length} repos. Each repo uses its selected branch (default{" "}
+              <span className="font-mono text-mute">{effectiveBranch || "—"}</span>); commits,
+              branches and PRs are handled per-repo. Runs locally.
+            </p>
           </Field>
-          <Field label="Execution">
-            <div className="space-y-1.5">
-              <Segmented
-                value={execution}
-                onChange={setExecution}
-                options={[
-                  { value: "local", label: "Local", title: "claude -p in the checkout" },
-                  { value: "cloud", label: "Cloud", title: "claude --remote on Anthropic VMs" },
-                ]}
-              />
-              <p className="text-[11px] leading-snug text-faint">
-                {execution === "cloud"
-                  ? "Runs remotely — pushes the branch first; results arrive as a remote branch/PR on GitHub."
-                  : "Runs in the project checkout on this machine."}
-              </p>
-            </div>
-          </Field>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Workspace">
+              <div className="space-y-1.5">
+                <Select
+                  value={workspaceMode}
+                  onChange={(e) => setWorkspaceMode(e.target.value as WorkspaceMode)}
+                >
+                  {WORKSPACE_OPTIONS.map((w) => (
+                    <option key={w.value} value={w.value}>
+                      {w.label}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-[11px] leading-snug text-faint">{workspaceHint}</p>
+              </div>
+            </Field>
+            <Field label="Execution">
+              <div className="space-y-1.5">
+                <Segmented
+                  value={execution}
+                  onChange={setExecution}
+                  options={[
+                    { value: "local", label: "Local", title: "claude -p in the checkout" },
+                    { value: "cloud", label: "Cloud", title: "claude --remote on Anthropic VMs" },
+                  ]}
+                />
+                <p className="text-[11px] leading-snug text-faint">
+                  {execution === "cloud"
+                    ? "Runs remotely — pushes the branch first; results arrive as a remote branch/PR on GitHub."
+                    : "Runs in the project checkout on this machine."}
+                </p>
+              </div>
+            </Field>
+          </div>
+        )}
 
         {/* model overrides */}
         <div className="rounded-lg border border-edge">

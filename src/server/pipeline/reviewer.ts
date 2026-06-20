@@ -6,6 +6,7 @@
  * - cap (config.maxReviewCycles) -> needs_attention + macOS notification
  */
 
+import path from "node:path";
 import type { ReviewVerdict, Task } from "@/lib/types";
 import { getConfig } from "@/server/db/config";
 import { REVIEW_SPEC, runClaudeReviewer } from "@/server/agents/claudeReviewer";
@@ -14,6 +15,13 @@ import { notify } from "@/server/notify";
 import { wasCanceled, wasInterrupted } from "./processRegistry";
 import { requireTask, transition } from "./stateMachine";
 import { requireProject, workspaceDir } from "./common";
+import {
+  commitAllRepos,
+  isMultiRepo,
+  projectRepos,
+  repoHeadShas,
+  taskRepoDirs,
+} from "./repos";
 
 const DIFF_CHAR_BUDGET = 160_000;
 
@@ -29,26 +37,38 @@ export type ReviewOutcome =
 /**
  * Assemble the diff for exactly this task's commits (they may interleave
  * with other tasks' commits on a shared branch, so we show each commit
- * individually rather than diffing a range).
+ * individually rather than diffing a range). `dirs` is one repo for a
+ * single-repo project, or every sub-repo for a multi-repo project — each
+ * commit is looked up in whichever repo contains it.
  */
-export async function buildTaskDiff(task: Task, cwd: string): Promise<string> {
+export async function buildTaskDiff(task: Task, dirs: string[]): Promise<string> {
   const chunks: string[] = [];
   let used = 0;
+  const multi = dirs.length > 1;
   for (const sha of task.commitShas) {
-    let patch: string;
-    try {
-      patch = await showCommit(cwd, sha);
-    } catch {
+    let patch: string | undefined;
+    let repoLabel = "";
+    for (const dir of dirs) {
+      try {
+        patch = await showCommit(dir, sha);
+        repoLabel = multi ? `${path.basename(dir)}: ` : "";
+        break;
+      } catch {
+        // not in this repo — try the next
+      }
+    }
+    if (patch === undefined) {
       patch = `commit ${sha}: <unavailable — not found in this checkout>`;
     }
-    if (used + patch.length > DIFF_CHAR_BUDGET) {
+    const block = multi ? `### ${repoLabel}commit ${sha.slice(0, 8)}\n${patch}` : patch;
+    if (used + block.length > DIFF_CHAR_BUDGET) {
       chunks.push(
         `\n[diff truncated — ${task.commitShas.length - chunks.length} more commit(s) omitted for size]`,
       );
       break;
     }
-    chunks.push(patch);
-    used += patch.length;
+    chunks.push(block);
+    used += block.length;
   }
   return chunks.join("\n");
 }
@@ -112,13 +132,25 @@ export async function commitOutstandingForReview(taskId: string): Promise<boolea
   const cwd = workspaceDir(task, project);
 
   try {
-    const base = await headSha(cwd).catch(() => undefined);
-    const sha = await commitAll(cwd, `friday: ${task.title} (manual review)`);
-    if (sha && sha !== base) {
-      task = transition(taskId, "manual_move", {
-        payload: { action: "force_review_commit", sha },
-        update: { commitShas: [...task.commitShas, sha] },
-      });
+    if (isMultiRepo(project)) {
+      const repos = projectRepos(project);
+      const baseShas = await repoHeadShas(repos);
+      const shas = await commitAllRepos(repos, `friday: ${task.title} (manual review)`, baseShas);
+      if (shas.length > 0) {
+        task = transition(taskId, "manual_move", {
+          payload: { action: "force_review_commit", shas },
+          update: { commitShas: [...task.commitShas, ...shas] },
+        });
+      }
+    } else {
+      const base = await headSha(cwd).catch(() => undefined);
+      const sha = await commitAll(cwd, `friday: ${task.title} (manual review)`);
+      if (sha && sha !== base) {
+        task = transition(taskId, "manual_move", {
+          payload: { action: "force_review_commit", sha },
+          update: { commitShas: [...task.commitShas, sha] },
+        });
+      }
     }
   } catch (err) {
     const message = `could not commit outstanding work for review: ${
@@ -155,7 +187,7 @@ export async function runReviewPhase(taskId: string): Promise<ReviewOutcome> {
   const config = getConfig();
 
   const round = task.reviewCycle;
-  const diff = await buildTaskDiff(task, cwd).catch(() => "");
+  const diff = await buildTaskDiff(task, taskRepoDirs(task, project)).catch(() => "");
 
   task = transition(taskId, "review_started", {
     payload: { spec: REVIEW_SPEC, round },

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS projects (
   path              TEXT NOT NULL,
   base_branch       TEXT NOT NULL DEFAULT 'main',
   default_execution TEXT NOT NULL DEFAULT 'local' CHECK (default_execution IN ('local','cloud')),
+  repos             TEXT,                          -- JSON ProjectRepo[] | NULL (multi-repo projects)
   created_at        TEXT NOT NULL
 );
 
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   context_paths     TEXT NOT NULL DEFAULT '[]',  -- JSON string[]
   scope_paths       TEXT NOT NULL DEFAULT '[]',  -- JSON string[] of glob/path patterns this task may touch
   branch            TEXT NOT NULL,
+  repo_branches     TEXT,                        -- JSON Record<repoPath,branch> | NULL (multi-repo per-repo branch overrides)
   workspace_mode    TEXT NOT NULL DEFAULT 'branch' CHECK (workspace_mode IN ('branch','worktree','new-branch')),
   board_column      TEXT NOT NULL DEFAULT 'todo' CHECK (board_column IN ('todo','in_dev','in_review','done')),
   run_state         TEXT NOT NULL DEFAULT 'idle' CHECK (run_state IN ('idle','queued','running','needs_attention','error')),
@@ -82,9 +84,11 @@ CREATE TABLE IF NOT EXISTS branch_prs (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   branch     TEXT NOT NULL,
   pr_url     TEXT NOT NULL,
+  repo_path  TEXT NOT NULL DEFAULT '',           -- multi-repo sub-repo root; '' for single-repo
+  repo_name  TEXT NOT NULL DEFAULT '',           -- multi-repo sub-repo display name; '' for single-repo
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE (project_id, branch)
+  UNIQUE (project_id, branch, repo_path)
 );
 
 CREATE TABLE IF NOT EXISTS status_reports (
@@ -118,18 +122,54 @@ CREATE TABLE IF NOT EXISTS task_messages (
 CREATE INDEX IF NOT EXISTS idx_task_messages_pending ON task_messages(task_id, consumed_at, id);
 `;
 
+/** True when `table` already has a column named `column`. */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return cols.some((c) => c.name === column);
+}
+
 /**
- * Additive migrations for DBs created before a column existed. CREATE TABLE IF
- * NOT EXISTS never alters an existing table, so new columns are added here,
- * each guarded against the "duplicate column" error so this stays idempotent.
+ * Forward-migrate DBs created before a column or constraint existed. CREATE
+ * TABLE IF NOT EXISTS is a no-op on an existing table, so additive/constraint
+ * changes are applied here, each guarded so this stays idempotent.
  */
 function migrate(db: Database.Database): void {
-  const columnExists = (table: string, column: string): boolean => {
-    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    return cols.some((c) => c.name === column);
-  };
-  if (!columnExists("tasks", "scope_paths")) {
+  // projects.repos (JSON) — additive, safe via ALTER.
+  if (!hasColumn(db, "projects", "repos")) {
+    db.exec(`ALTER TABLE projects ADD COLUMN repos TEXT`);
+  }
+
+  // tasks.repo_branches (JSON) — additive, safe via ALTER.
+  if (!hasColumn(db, "tasks", "repo_branches")) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN repo_branches TEXT`);
+  }
+
+  // tasks.scope_paths (JSON) — additive, safe via ALTER.
+  if (!hasColumn(db, "tasks", "scope_paths")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN scope_paths TEXT NOT NULL DEFAULT '[]'`);
+  }
+
+  // branch_prs gained a per-repo dimension AND a widened UNIQUE constraint
+  // (project_id, branch, repo_path). SQLite can't alter a constraint in place,
+  // so rebuild the table when the old schema is detected.
+  if (!hasColumn(db, "branch_prs", "repo_path")) {
+    db.exec(`
+      CREATE TABLE branch_prs_new (
+        id         TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        branch     TEXT NOT NULL,
+        pr_url     TEXT NOT NULL,
+        repo_path  TEXT NOT NULL DEFAULT '',
+        repo_name  TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, branch, repo_path)
+      );
+      INSERT INTO branch_prs_new (id, project_id, branch, pr_url, repo_path, repo_name, created_at, updated_at)
+        SELECT id, project_id, branch, pr_url, '', '', created_at, updated_at FROM branch_prs;
+      DROP TABLE branch_prs;
+      ALTER TABLE branch_prs_new RENAME TO branch_prs;
+    `);
   }
 }
 
