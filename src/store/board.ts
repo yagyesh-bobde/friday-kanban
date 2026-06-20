@@ -100,6 +100,12 @@ export const useBoard = create<BoardStore>()((set, get) => ({
         // malformed frame — ignore
       }
     };
+
+    // Prefetch the daily status in the background so the pane is ready to
+    // display the moment it's expanded. Not awaited: report generation can
+    // take seconds (haiku summarizer) and must not block the board. Live
+    // status_report_ready events still patch in any reports that finish later.
+    void get().loadStatusReports();
   },
 
   refresh: async () => {

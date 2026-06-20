@@ -216,6 +216,43 @@ export async function commitAll(cwd: string, message: string): Promise<string | 
   return headSha(cwd);
 }
 
+/** Paths (relative to cwd) with staged or unstaged changes, including untracked. */
+export async function changedFiles(cwd: string): Promise<string[]> {
+  const out = await git(cwd, ["status", "--porcelain", "--untracked-files=all"]);
+  return out
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      // Porcelain v1: "XY <path>" or "XY <old> -> <new>" for renames.
+      const rest = line.slice(3);
+      const arrow = rest.indexOf(" -> ");
+      const p = arrow >= 0 ? rest.slice(arrow + 4) : rest;
+      return p.replace(/^"(.*)"$/, "$1");
+    });
+}
+
+/**
+ * Stage ONLY the given (exact) file paths and commit. Used for scope-isolated
+ * tasks sharing a checkout: each task commits exactly the changed files inside
+ * its declared scope, so a concurrent task's (disjoint) uncommitted edits are
+ * never swept in. Returns the new commit sha, or undefined when nothing was
+ * staged.
+ */
+export async function commitPaths(
+  cwd: string,
+  message: string,
+  files: string[],
+): Promise<string | undefined> {
+  if (files.length === 0) return undefined;
+  // `--` guards against a path being read as a flag.
+  await git(cwd, ["add", "--", ...files]);
+  const staged = await git(cwd, ["diff", "--cached", "--name-only"]);
+  if (staged.trim().length === 0) return undefined;
+  await git(cwd, ["commit", "-m", message]);
+  return headSha(cwd);
+}
+
 /** Commits reachable from `head` but not `base`, oldest first. */
 export async function revList(cwd: string, base: string, head: string): Promise<string[]> {
   const out = await git(cwd, ["rev-list", "--reverse", `${base}..${head}`]);

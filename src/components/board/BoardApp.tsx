@@ -21,16 +21,21 @@ import type { Column as ColumnId, Task } from "@/lib/types";
 import { COLUMNS } from "@/lib/constants";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
-import { legalTargetsFor } from "@/components/util";
+import { usePrefs } from "@/store/prefs";
+import { isPastTask, legalTargetsFor } from "@/components/util";
 import { BoardHeader } from "./BoardHeader";
 import { BoardColumn } from "./Column";
+import { PastTasksPane } from "./PastTasksPane";
 import { TaskCardBody } from "./TaskCard";
 import { StatusPane } from "@/components/StatusPane";
 import { Toasts } from "@/components/ui/Toasts";
 import { NewTaskModal } from "@/components/modals/NewTaskModal";
+import { QuickCreateModal } from "@/components/modals/QuickCreateModal";
 import { AddProjectModal } from "@/components/modals/AddProjectModal";
 import { SendBackDialog } from "@/components/modals/SendBackDialog";
 import { TaskDrawer } from "@/components/task/TaskDrawer";
+import { SettingsView } from "@/components/settings/SettingsView";
+import { FireVibes } from "@/components/effects/FireVibes";
 import { IconFolder, IconSpark, Spinner } from "@/components/ui/icons";
 import { Button } from "@/components/ui/fields";
 
@@ -73,7 +78,11 @@ function BoardColumns() {
 
   const byColumn = useMemo(() => {
     const map: Record<ColumnId, Task[]> = { todo: [], in_dev: [], in_review: [], done: [] };
-    for (const task of Object.values(tasks)) map[task.column].push(task);
+    // Done cards aged past the cutoff live in the Past view, not the board.
+    for (const task of Object.values(tasks)) {
+      if (isPastTask(task)) continue;
+      map[task.column].push(task);
+    }
     // todo: FIFO order (oldest first, matches queue order); done: newest first;
     // active columns: most recently touched first.
     map.todo.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -149,10 +158,46 @@ export default function BoardApp() {
   const loaded = useBoard((s) => s.loaded);
   const loadError = useBoard((s) => s.loadError);
   const hasProjects = useBoard((s) => s.projects.length > 0);
+  const boardView = useUi((s) => s.boardView);
+  const openQuickCreate = useUi((s) => s.openQuickCreate);
+  const settingsOpen = useUi((s) => s.settingsOpen);
+  const openSettings = useUi((s) => s.openSettings);
+  const closeSettings = useUi((s) => s.closeSettings);
+  const anyModalOpen = useUi(
+    (s) =>
+      s.quickCreateOpen ||
+      s.newTaskOpen ||
+      s.addProjectOpen ||
+      s.sendBackTaskId !== null ||
+      s.drawerTaskId !== null,
+  );
 
   useEffect(() => {
     void init();
+    // Honor the "auto-enable fire vibes" preference on every app init.
+    const prefs = usePrefs.getState();
+    if (prefs.autoFireVibes) prefs.setFireVibes(true);
   }, [init]);
+
+  useEffect(() => {
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    const onKey = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (!mod || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "k") {
+        e.preventDefault();
+        if (!anyModalOpen && !settingsOpen) openQuickCreate();
+      } else if (key === "p") {
+        // Cmd/Ctrl+P toggles the full-page settings view.
+        e.preventDefault();
+        if (settingsOpen) closeSettings();
+        else if (!anyModalOpen) openSettings();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anyModalOpen, settingsOpen, openQuickCreate, openSettings, closeSettings]);
 
   return (
     <div className="board-grid flex h-screen flex-col overflow-hidden">
@@ -177,6 +222,8 @@ export default function BoardApp() {
           </div>
         ) : !hasProjects ? (
           <NoProjects />
+        ) : boardView === "past" ? (
+          <PastTasksPane />
         ) : (
           <BoardColumns />
         )}
@@ -185,11 +232,16 @@ export default function BoardApp() {
       <StatusPane />
 
       {/* overlays */}
+      <SettingsView />
       <TaskDrawer />
       <NewTaskModal />
+      <QuickCreateModal />
       <AddProjectModal />
       <SendBackDialog />
       <Toasts />
+
+      {/* just for the vibes */}
+      <FireVibes />
     </div>
   );
 }

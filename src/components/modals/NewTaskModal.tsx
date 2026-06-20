@@ -35,7 +35,7 @@ import {
   IconX,
   Spinner,
 } from "@/components/ui/icons";
-import { ModelSpecEditor } from "@/components/settings/SettingsPopover";
+import { ModelSpecEditor } from "@/components/settings/ModelSpecEditor";
 import { cn } from "@/components/util";
 
 const NEW_BRANCH = "__new__";
@@ -77,6 +77,7 @@ function specsEqual(a: ModelSpec, b: ModelSpec): boolean {
 export function NewTaskModal() {
   const open = useUi((s) => s.newTaskOpen);
   const prefillProjectId = useUi((s) => s.newTaskProjectId);
+  const prefillPrompt = useUi((s) => s.newTaskInitialPrompt);
   const close = useUi((s) => s.closeNewTask);
   const toast = useUi((s) => s.toast);
   const projects = useBoard((s) => s.projects);
@@ -87,6 +88,7 @@ export function NewTaskModal() {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [contextPaths, setContextPaths] = useState<string[]>([]);
+  const [scopePaths, setScopePaths] = useState<string[]>([]);
   const [images, setImages] = useState<TaskImageInput[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [branchChoice, setBranchChoice] = useState<string>("");
@@ -119,8 +121,9 @@ export function NewTaskModal() {
     const initial = prefillProjectId ?? projects[0]?.id ?? "";
     setProjectId(initial);
     setTitle("");
-    setPrompt("");
+    setPrompt(prefillPrompt ?? "");
     setContextPaths([]);
+    setScopePaths([]);
     setImages([]);
     setNewBranchName("");
     setWorkspaceMode("branch");
@@ -250,6 +253,7 @@ export function NewTaskModal() {
       title: title.trim(),
       prompt: prompt.trim(),
       ...(contextPaths.length > 0 ? { contextPaths } : {}),
+      ...(scopePaths.length > 0 ? { scopePaths } : {}),
       ...(images.length > 0 ? { images } : {}),
       branch: effectiveBranch,
       ...(Object.keys(repoOverrides).length > 0 ? { repoBranches: repoOverrides } : {}),
@@ -479,6 +483,20 @@ export function NewTaskModal() {
             }
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onPaste={(e) => {
+              const imageItems = Array.from(e.clipboardData.items).filter(
+                (item) => item.kind === "file" && item.type.startsWith("image/"),
+              );
+              if (imageItems.length > 0) {
+                e.preventDefault();
+                const files = imageItems
+                  .map((item) => item.getAsFile())
+                  .filter(Boolean) as File[];
+                const dt = new DataTransfer();
+                files.forEach((f) => dt.items.add(f));
+                void addFiles(dt.files);
+              }
+            }}
             className="font-mono text-[12px]"
           />
         </Field>
@@ -492,13 +510,29 @@ export function NewTaskModal() {
           />
         </Field>
 
+        {/* file scope */}
+        <Field label="File scope (optional)">
+          <div className="space-y-1.5">
+            <ChipsInput
+              value={scopePaths}
+              onChange={setScopePaths}
+              placeholder="src/server/** , src/lib/foo.ts"
+            />
+            <p className="text-[11px] leading-snug text-faint">
+              Globs/paths this task will touch. Same-branch tasks with non-overlapping scopes
+              run in parallel instead of queueing. Leave empty to run serially. When set, the
+              agent&apos;s edits are limited to this scope and committed for you.
+            </p>
+          </div>
+        </Field>
+
         {/* image attachments */}
         <Field
           label="Images"
           hint={
             execution === "cloud"
               ? "local execution only — ignored on cloud runs"
-              : `optional · up to ${MAX_ATTACHMENTS} · PNG/JPG/GIF/WebP`
+              : `optional · up to ${MAX_ATTACHMENTS} · PNG/JPG/GIF/WebP · paste in prompt`
           }
         >
           <div className="space-y-2">

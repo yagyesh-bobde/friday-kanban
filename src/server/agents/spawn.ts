@@ -50,6 +50,33 @@ export interface SpawnedAgent {
 
 const STDERR_TAIL_MAX = 8 * 1024;
 
+/**
+ * Common install locations for the agent CLIs (`claude`, `codex`). Appended to
+ * PATH so a bare `claude` resolves even when the app was launched from a shell
+ * or GUI whose PATH omits them (e.g. nvm shells without `~/.local/bin`, where
+ * Claude Code installs by default) — otherwise the spawn fails with ENOENT.
+ */
+function agentBinDirs(home: string | undefined): string[] {
+  return [
+    home ? `${home}/.local/bin` : "",
+    home ? `${home}/.bun/bin` : "",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ].filter((dir): dir is string => dir.length > 0);
+}
+
+/**
+ * Return `env` with the agent-CLI bin directories appended to PATH (dedup'd,
+ * preserving existing entries and their precedence). Appends rather than
+ * prepends so an explicitly-chosen binary earlier on PATH still wins.
+ */
+export function augmentPathEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const existing = (env.PATH ?? "").split(":").filter((p) => p.length > 0);
+  const additions = agentBinDirs(env.HOME).filter((dir) => !existing.includes(dir));
+  if (additions.length === 0) return env;
+  return { ...env, PATH: [...existing, ...additions].join(":") };
+}
+
 export function spawnAgent(opts: SpawnAgentOptions): SpawnedAgent {
   const hardTimeoutMs = opts.hardTimeoutMs ?? DEFAULT_HARD_TIMEOUT_MS;
   const stallTimeoutMs = opts.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
@@ -61,7 +88,7 @@ export function spawnAgent(opts: SpawnAgentOptions): SpawnedAgent {
   const stdio: StdioOptions = [opts.stdin ?? "ignore", "pipe", "pipe"];
   const child: ChildProcess = spawn(bin, args, {
     cwd: opts.cwd,
-    env: opts.env ?? process.env,
+    env: augmentPathEnv(opts.env ?? process.env),
     stdio,
     // Own process group so a kill reaches the agent's children (claude/codex
     // fork helper + MCP subprocesses); otherwise child.kill() only signals the

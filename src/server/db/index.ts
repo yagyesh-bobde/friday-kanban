@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title             TEXT NOT NULL,
   prompt            TEXT NOT NULL,
   context_paths     TEXT NOT NULL DEFAULT '[]',  -- JSON string[]
+  scope_paths       TEXT NOT NULL DEFAULT '[]',  -- JSON string[] of glob/path patterns this task may touch
   branch            TEXT NOT NULL,
   repo_branches     TEXT,                        -- JSON Record<repoPath,branch> | NULL (multi-repo per-repo branch overrides)
   workspace_mode    TEXT NOT NULL DEFAULT 'branch' CHECK (workspace_mode IN ('branch','worktree','new-branch')),
@@ -106,6 +107,19 @@ CREATE TABLE IF NOT EXISTS config (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL                             -- JSON
 );
+
+-- Free-form user messages addressed to a task (mid-task chat). A message sent
+-- to a RUNNING task interrupts the live agent; the pipeline drains unconsumed
+-- messages at the next boundary and resumes the session with them as a
+-- human directive (fix round).
+CREATE TABLE IF NOT EXISTS task_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  message     TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  consumed_at TEXT                                -- NULL until drained by the pipeline
+);
+CREATE INDEX IF NOT EXISTS idx_task_messages_pending ON task_messages(task_id, consumed_at, id);
 `;
 
 /** True when `table` already has a column named `column`. */
@@ -115,9 +129,9 @@ function hasColumn(db: Database.Database, table: string, column: string): boolea
 }
 
 /**
- * Forward-migrate DBs created before multi-repo support. CREATE TABLE IF NOT
- * EXISTS is a no-op on an existing table, so additive/constraint changes are
- * applied here.
+ * Forward-migrate DBs created before a column or constraint existed. CREATE
+ * TABLE IF NOT EXISTS is a no-op on an existing table, so additive/constraint
+ * changes are applied here, each guarded so this stays idempotent.
  */
 function migrate(db: Database.Database): void {
   // projects.repos (JSON) — additive, safe via ALTER.
@@ -128,6 +142,11 @@ function migrate(db: Database.Database): void {
   // tasks.repo_branches (JSON) — additive, safe via ALTER.
   if (!hasColumn(db, "tasks", "repo_branches")) {
     db.exec(`ALTER TABLE tasks ADD COLUMN repo_branches TEXT`);
+  }
+
+  // tasks.scope_paths (JSON) — additive, safe via ALTER.
+  if (!hasColumn(db, "tasks", "scope_paths")) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN scope_paths TEXT NOT NULL DEFAULT '[]'`);
   }
 
   // branch_prs gained a per-repo dimension AND a widened UNIQUE constraint

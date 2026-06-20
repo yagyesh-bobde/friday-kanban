@@ -12,7 +12,7 @@ import { getConfig } from "@/server/db/config";
 import { REVIEW_SPEC, runClaudeReviewer } from "@/server/agents/claudeReviewer";
 import { commitAll, headSha, showCommit } from "@/server/git";
 import { notify } from "@/server/notify";
-import { wasCanceled } from "./processRegistry";
+import { wasCanceled, wasInterrupted } from "./processRegistry";
 import { requireTask, transition } from "./stateMachine";
 import { requireProject, workspaceDir } from "./common";
 import {
@@ -30,7 +30,9 @@ export type ReviewOutcome =
   | { kind: "changes_requested"; verdict: ReviewVerdict }
   | { kind: "exhausted"; verdict: ReviewVerdict }
   | { kind: "failed" }
-  | { kind: "canceled" };
+  | { kind: "canceled" }
+  /** A mid-task user message interrupted the reviewer; resume with it as a fix. */
+  | { kind: "interrupted" };
 
 /**
  * Assemble the diff for exactly this task's commits (they may interleave
@@ -201,6 +203,16 @@ export async function runReviewPhase(taskId: string): Promise<ReviewOutcome> {
 
   if (wasCanceled(taskId)) {
     return { kind: "canceled" };
+  }
+
+  if (wasInterrupted(taskId)) {
+    // The reviewer was killed by a mid-task user message. Bounce to In Dev so
+    // the pipeline can resume with the message as a fix round.
+    transition(taskId, "review_changes_requested", {
+      payload: { source: "human", viaMessage: true },
+      update: { error: undefined },
+    });
+    return { kind: "interrupted" };
   }
 
   if (!review.verdict) {

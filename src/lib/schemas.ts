@@ -21,6 +21,7 @@ import type {
   Project,
   ProjectRepo,
   ProjectStatusReport,
+  QuickCreateInput,
   ReviewFinding,
   ReviewVerdict,
   Task,
@@ -58,6 +59,7 @@ export const taskEventTypeSchema = z.enum([
   "pr_created",
   "task_retried",
   "task_canceled",
+  "task_interrupted",
   "manual_move",
   "budget_exceeded",
   "error",
@@ -112,6 +114,7 @@ export const taskSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().min(1),
   contextPaths: z.array(z.string()),
+  scopePaths: z.array(z.string()),
   branch: z.string().min(1),
   repoBranches: z.record(z.string(), z.string().min(1)).optional(),
   workspaceMode: workspaceModeSchema,
@@ -250,6 +253,7 @@ export const createTaskInputSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().min(1),
   contextPaths: z.array(z.string()).optional(),
+  scopePaths: z.array(z.string()).optional(),
   images: z.array(taskImageInputSchema).max(MAX_ATTACHMENTS).optional(),
   branch: z.string().min(1).optional(),
   repoBranches: z.record(z.string(), z.string().min(1)).optional(),
@@ -269,3 +273,42 @@ export const sendMessageInputSchema = z.object({
 });
 
 export const updateConfigInputSchema = appConfigSchema.partial() satisfies z.ZodType<UpdateConfigInput>;
+
+// ── Quick task create (Cmd+K) ──────────────────────────────────────────────
+
+/** Request body for POST /api/tasks/quick-create. */
+export const quickCreateInputSchema = z.object({
+  text: z.string().min(1),
+  answers: z
+    .array(z.object({ id: z.string().min(1), answer: z.string().min(1) }))
+    .optional(),
+}) satisfies z.ZodType<QuickCreateInput>;
+
+const quickParseQuestionSchema = z.object({
+  id: z.string().min(1),
+  question: z.string().min(1),
+  options: z.array(z.string()).default([]),
+});
+
+/**
+ * Validates the JSON object the Haiku parser emits — either a ready-to-create
+ * task or a round of clarifying questions.
+ */
+export const quickParseOutputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("task"),
+    task: z.object({
+      projectId: z.string().min(1),
+      title: z.string().min(1),
+      prompt: z.string().min(1),
+      branch: z.string().min(1).optional(),
+      scopePaths: z.array(z.string().min(1)).optional(),
+      contextPaths: z.array(z.string().min(1)).optional(),
+      execution: executionSchema.optional(),
+    }),
+  }),
+  z.object({
+    kind: z.literal("questions"),
+    questions: z.array(quickParseQuestionSchema).min(1),
+  }),
+]);

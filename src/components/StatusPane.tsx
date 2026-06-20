@@ -1,10 +1,13 @@
 "use client";
 
 /**
- * Morning status pane — collapsed bar at the bottom of the board. Expanding
- * triggers GET /api/status-reports (generated on first board load of the day,
- * cached per project+date in SQLite). Skeleton while the haiku summarizer
- * runs; live updates arrive via status_report_ready board events.
+ * Morning status pane — collapsed bar at the bottom of the board. Reports are
+ * prefetched in the background on board init (GET /api/status-reports,
+ * generated on first board load of the day, cached per project+date in
+ * SQLite), so expanding usually shows them instantly. The effect below is a
+ * fallback that loads on expand if the prefetch hasn't populated the store
+ * yet. Skeleton while the haiku summarizer runs; live updates arrive via
+ * status_report_ready board events.
  */
 
 import { useEffect } from "react";
@@ -47,7 +50,8 @@ export function StatusPane() {
   const error = useBoard((s) => s.statusReportsError);
   const load = useBoard((s) => s.loadStatusReports);
 
-  // first expand of the session triggers generation
+  // Fallback: reports are normally prefetched on board init, but load on
+  // expand if the store is still empty (e.g. prefetch failed silently).
   useEffect(() => {
     if (open && reports === null && !loading && !error) void load();
   }, [open, reports, loading, error, load]);
@@ -76,7 +80,9 @@ export function StatusPane() {
             {reports.length} report{reports.length === 1 ? "" : "s"}
           </span>
         ) : (
-          <span className="font-mono text-[10px] text-faint">expand to generate</span>
+          <span className="font-mono text-[10px] text-faint">
+            {loading ? "preparing…" : "expand to generate"}
+          </span>
         )}
       </button>
 

@@ -5,24 +5,42 @@
  * cap (PUT /api/config), Create PR menu, settings, Add Project, New Task.
  */
 
+import { useEffect, useState } from "react";
 import { useBoard } from "@/store/board";
 import { useUi } from "@/store/ui";
-import { cn } from "@/components/util";
+import { useFeatureFlag } from "@/lib/featureFlags";
+import { cn, isPastTask } from "@/components/util";
 import { Segmented, Stepper } from "@/components/ui/fields";
-import { IconPlus, IconSpark } from "@/components/ui/icons";
+import { IconGear, IconPlus, IconSpark } from "@/components/ui/icons";
 import { CreatePrMenu } from "./CreatePrMenu";
-import { SettingsPopover } from "@/components/settings/SettingsPopover";
+
+/** ⌘ on macOS, Ctrl elsewhere. Resolved after mount to avoid SSR mismatch. */
+function useModKey() {
+  const [mod, setMod] = useState("⌘");
+  useEffect(() => {
+    setMod(/Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "⌘" : "Ctrl");
+  }, []);
+  return mod;
+}
 
 export function BoardHeader() {
   const config = useBoard((s) => s.config);
   const connection = useBoard((s) => s.connection);
   const updateConfig = useBoard((s) => s.updateConfig);
   const projects = useBoard((s) => s.projects);
+  const pastCount = useBoard((s) =>
+    Object.values(s.tasks).reduce((n, t) => n + (isPastTask(t) ? 1 : 0), 0),
+  );
   const openNewTask = useUi((s) => s.openNewTask);
   const openAddProject = useUi((s) => s.openAddProject);
+  const openSettings = useUi((s) => s.openSettings);
+  const boardView = useUi((s) => s.boardView);
+  const setBoardView = useUi((s) => s.setBoardView);
+  const keyboardHints = useFeatureFlag("keyboardHints");
+  const mod = useModKey();
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
+    <header className="relative z-40 flex h-12 shrink-0 items-center gap-3 border-b border-edge bg-panel/80 px-4 backdrop-blur">
       {/* brand */}
       <div className="flex items-center gap-2">
         <IconSpark size={16} className="text-ember" />
@@ -81,8 +99,49 @@ export function BoardHeader() {
 
       <span className="flex-1" />
 
+      <Segmented
+        size="sm"
+        value={boardView}
+        onChange={setBoardView}
+        options={[
+          { value: "board", label: "Board", title: "Active kanban" },
+          {
+            value: "past",
+            title: "Done tasks untouched for over a week, by date",
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                Past
+                {pastCount > 0 ? (
+                  <span className="rounded bg-overlay px-1 py-px font-mono text-[9px] text-faint">
+                    {pastCount}
+                  </span>
+                ) : null}
+              </span>
+            ),
+          },
+        ]}
+      />
+
+      <div className="mx-1 h-5 w-px bg-edge" />
+
+      {keyboardHints ? (
+        <span className="hidden items-center gap-1.5 text-[11px] text-faint lg:flex">
+          <kbd>{mod}K</kbd>
+          <span>create</span>
+          <kbd>{mod}P</kbd>
+          <span>settings</span>
+        </span>
+      ) : null}
+
       <CreatePrMenu />
-      <SettingsPopover />
+      <button
+        onClick={() => openSettings()}
+        className="rounded-md border border-edge p-[7px] text-mute transition-colors hover:border-edge-bright hover:text-ink"
+        title={`Settings (${mod}P)`}
+        aria-label="Settings"
+      >
+        <IconGear size={14} />
+      </button>
 
       <div className="mx-1 h-5 w-px bg-edge" />
 

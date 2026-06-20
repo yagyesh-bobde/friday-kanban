@@ -2,9 +2,15 @@
  * The scheduler: admission control for task pipelines.
  *
  * - Global running-count gate: at most config.maxConcurrentTasks pipelines.
- * - Per (projectId, branch) FIFO mutex for tasks that share the main checkout
- *   (workspaceMode 'branch' / 'new-branch'); worktree + cloud tasks skip the
- *   mutex (they are isolated) but still count against the global gate.
+ * - Per (projectId, branch) admission for tasks that share the main checkout
+ *   (workspaceMode 'branch' / 'new-branch'). Historically this was a strict
+ *   FIFO mutex (one task per branch at a time). It is now SCOPE-AWARE: two
+ *   same-branch tasks run CONCURRENTLY when their declared file scopes are
+ *   disjoint, and only queue when their scopes overlap. A task with an empty
+ *   (undeclared) scope is treated as touching everything, so it still
+ *   serializes with every other task on its branch — preserving the original
+ *   behaviour for tasks that don't opt in. Worktree + cloud tasks are isolated
+ *   and skip branch admission entirely (they still count against the global gate).
  * - Auto mode drains Todo (oldest first) up to the cap; manual mode only runs
  *   tasks explicitly started (drag Todo -> In Dev).
  * - Reacts to config changes (mode flip / cap raise -> pump).
@@ -18,6 +24,7 @@ import { getTask, listTasksByColumn } from "@/server/db/tasks";
 import { transition } from "./stateMachine";
 import { runTaskPipeline, type PipelineEntry } from "./runTask";
 import { clearCanceled } from "./processRegistry";
+import { scopesOverlap } from "./scope";
 import { notify } from "@/server/notify";
 
 const AUTO_DRAIN_INTERVAL_MS = 15_000;
@@ -29,7 +36,7 @@ interface QueuedEntry {
 
 function mutexKey(task: Task): string | undefined {
   // Worktree tasks are isolated; cloud tasks run on a VM. Only tasks that
-  // mutate the main checkout serialize on (projectId, branch).
+  // mutate the main checkout contend on (projectId, branch).
   if (task.workspaceMode === "worktree" || task.execution === "cloud") return undefined;
   return `${task.projectId}::${task.branch}`;
 }
@@ -37,8 +44,8 @@ function mutexKey(task: Task): string | undefined {
 export class Scheduler {
   /** taskIds with a live pipeline (counts against maxConcurrentTasks). */
   private readonly running = new Set<string>();
-  /** mutexKey -> taskId currently holding the per-project-branch lock. */
-  private readonly locks = new Map<string, string>();
+  /** mutexKey -> (taskId -> its scopePaths) for tasks currently running on that branch. */
+  private readonly branchRunning = new Map<string, Map<string, string[]>>();
   /** mutexKey -> FIFO of waiting entries. */
   private readonly queues = new Map<string, QueuedEntry[]>();
   /** Entries waiting only on the global gate (no mutex contention). */
@@ -79,9 +86,10 @@ export class Scheduler {
   }
 
   /**
-   * Admission point: start the task's pipeline at `entry` now if a slot and
-   * the mutex are free, else queue it FIFO (runState 'queued').
-   * The caller must have validated the command (state machine drag rules).
+   * Admission point: start the task's pipeline at `entry` now if a slot is free
+   * and no scope-conflicting task is running on its branch, else queue it FIFO
+   * (runState 'queued'). The caller must have validated the command (state
+   * machine drag rules).
    */
   enqueue(taskId: string, entry: PipelineEntry): void {
     const task = getTask(taskId);
@@ -92,12 +100,12 @@ export class Scheduler {
 
     const key = mutexKey(task);
     const capacity = this.running.size < getConfig().maxConcurrentTasks;
-    const lockFree = key === undefined || !this.locks.has(key);
+    const admissible = key === undefined || this.canRunOnKey(key, taskId, task.scopePaths);
     // A Todo start advances to In Dev; any other entry (fix / forced review /
     // retry re-review) keeps the task in its current column while it waits.
     const queuedColumn: Column = entry.kind === "implement" ? "in_dev" : task.column;
 
-    if (capacity && lockFree) {
+    if (capacity && admissible) {
       // Record the admission synchronously so the board (and the API response
       // that triggered this) immediately shows in_dev/queued instead of the
       // task lingering in its old column until dev_started lands.
@@ -111,7 +119,7 @@ export class Scheduler {
 
     // Mark queued (visible on the board) and park it.
     transition(taskId, "task_queued", {
-      payload: { waitingOn: !lockFree ? "branch_mutex" : "concurrency_cap", entry: entry.kind },
+      payload: { waitingOn: !admissible ? "branch_scope" : "concurrency_cap", entry: entry.kind },
       update: { column: queuedColumn },
     });
     const queued: QueuedEntry = { taskId, entry };
@@ -167,9 +175,30 @@ export class Scheduler {
     return false;
   }
 
+  /**
+   * Can a task with `scopePaths` run on `key` right now? Only if no OTHER task
+   * currently running on that branch has an overlapping scope.
+   */
+  private canRunOnKey(key: string, taskId: string, scopePaths: string[]): boolean {
+    const live = this.branchRunning.get(key);
+    if (!live || live.size === 0) return true;
+    for (const [otherId, otherScope] of live) {
+      if (otherId === taskId) continue;
+      if (scopesOverlap(scopePaths, otherScope)) return false;
+    }
+    return true;
+  }
+
   private launch(task: Task, entry: PipelineEntry, key: string | undefined): void {
     this.running.add(task.id);
-    if (key !== undefined) this.locks.set(key, task.id);
+    if (key !== undefined) {
+      let live = this.branchRunning.get(key);
+      if (!live) {
+        live = new Map();
+        this.branchRunning.set(key, live);
+      }
+      live.set(task.id, task.scopePaths);
+    }
 
     runTaskPipeline(task.id, entry)
       .catch((err: unknown) => {
@@ -186,28 +215,39 @@ export class Scheduler {
       })
       .finally(() => {
         this.running.delete(task.id);
-        if (key !== undefined && this.locks.get(key) === task.id) {
-          this.locks.delete(key);
+        if (key !== undefined) {
+          const live = this.branchRunning.get(key);
+          live?.delete(task.id);
+          if (live && live.size === 0) this.branchRunning.delete(key);
         }
         this.pump();
         this.autoDrain();
       });
   }
 
-  /** Start queued entries whose mutex is free, while capacity remains. */
+  /** Start queued entries whose scope is now free, while capacity remains. */
   private pump(): void {
     const config = getConfig();
 
-    // Per-mutex queues first (FIFO within each key).
+    // Per-branch queues first (FIFO within each key, but a scope-disjoint entry
+    // may overtake a blocked head — that's the whole point of parallelism).
     for (const [key, queue] of [...this.queues.entries()]) {
-      if (this.running.size >= config.maxConcurrentTasks) return;
-      if (this.locks.has(key)) continue;
-      const next = queue.shift();
-      if (queue.length === 0) this.queues.delete(key);
-      if (!next) continue;
-      const task = getTask(next.taskId);
-      if (!task || task.runState !== "queued") continue; // canceled/retried while waiting
-      this.launch(task, next.entry, key);
+      const remaining: QueuedEntry[] = [];
+      for (const next of queue) {
+        if (this.running.size >= config.maxConcurrentTasks) {
+          remaining.push(next);
+          continue;
+        }
+        const task = getTask(next.taskId);
+        if (!task || task.runState !== "queued") continue; // canceled/retried while waiting
+        if (this.canRunOnKey(key, task.id, task.scopePaths)) {
+          this.launch(task, next.entry, key);
+        } else {
+          remaining.push(next);
+        }
+      }
+      if (remaining.length === 0) this.queues.delete(key);
+      else this.queues.set(key, remaining);
     }
 
     // Then the global (mutex-free) queue.

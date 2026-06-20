@@ -19,12 +19,32 @@ export interface Toast {
 
 let toastSeq = 1;
 
+export type BoardView = "board" | "past";
+
 interface UiStore {
+  // active board vs. past (aged-out done) tasks
+  boardView: BoardView;
+  setBoardView: (view: BoardView) => void;
+
   // new task modal
   newTaskOpen: boolean;
   newTaskProjectId?: string;
-  openNewTask: (projectId?: string) => void;
+  newTaskInitialPrompt?: string;
+  openNewTask: (projectId?: string, initialPrompt?: string) => void;
   closeNewTask: () => void;
+
+  // quick-create modal (Cmd+K)
+  quickCreateOpen: boolean;
+  openQuickCreate: () => void;
+  closeQuickCreate: () => void;
+
+  // full-page settings view (Cmd+P / Ctrl+P)
+  settingsOpen: boolean;
+  /** Active settings section id (see settings/registry.tsx). */
+  settingsSection: string;
+  openSettings: (section?: string) => void;
+  closeSettings: () => void;
+  setSettingsSection: (section: string) => void;
 
   // add project modal
   addProjectOpen: boolean;
@@ -52,11 +72,27 @@ interface UiStore {
 }
 
 export const useUi = create<UiStore>()((set, get) => ({
+  boardView: "board",
+  setBoardView: (view) => set({ boardView: view }),
+
   newTaskOpen: false,
   newTaskProjectId: undefined,
-  openNewTask: (projectId) =>
-    set({ newTaskOpen: true, newTaskProjectId: projectId }),
-  closeNewTask: () => set({ newTaskOpen: false, newTaskProjectId: undefined }),
+  newTaskInitialPrompt: undefined,
+  openNewTask: (projectId, initialPrompt) =>
+    set({ newTaskOpen: true, newTaskProjectId: projectId, newTaskInitialPrompt: initialPrompt }),
+  closeNewTask: () =>
+    set({ newTaskOpen: false, newTaskProjectId: undefined, newTaskInitialPrompt: undefined }),
+
+  quickCreateOpen: false,
+  openQuickCreate: () => set({ quickCreateOpen: true }),
+  closeQuickCreate: () => set({ quickCreateOpen: false }),
+
+  settingsOpen: false,
+  settingsSection: "agents",
+  openSettings: (section) =>
+    set(section ? { settingsOpen: true, settingsSection: section } : { settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
+  setSettingsSection: (section) => set({ settingsSection: section }),
 
   addProjectOpen: false,
   openAddProject: () => set({ addProjectOpen: true }),

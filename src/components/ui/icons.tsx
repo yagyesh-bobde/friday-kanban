@@ -34,6 +34,13 @@ export const IconX = (p: IconProps) => (
   </svg>
 );
 
+export const IconArchive = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="4" rx="1" />
+    <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />
+  </svg>
+);
+
 export const IconChevronDown = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="m6 9 6 6 6-6" />

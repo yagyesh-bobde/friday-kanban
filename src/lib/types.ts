@@ -110,6 +110,14 @@ export interface Task {
   /** Extra repo files/dirs referenced in the prompt (paths relative to repo root). */
   contextPaths: string[];
   /**
+   * Glob/path patterns (relative to repo root) this task is allowed to touch.
+   * Empty = undeclared (the task may touch anything, so it serializes with
+   * every other task on its branch). When two same-branch tasks both declare
+   * NON-overlapping scopes they run in parallel instead of queueing, and a
+   * scoped task's commit stages ONLY these paths (see scheduler + implementer).
+   */
+  scopePaths: string[];
+  /**
    * Target branch in the project checkout (defaults to the project's
    * baseBranch). For a multi-repo project this is the DEFAULT branch applied to
    * every repo that has no explicit override in `repoBranches`.
@@ -169,6 +177,7 @@ export type TaskEventType =
   | "pr_created"
   | "task_retried"
   | "task_canceled"
+  | "task_interrupted"
   | "manual_move"
   | "budget_exceeded"
   | "error";
@@ -358,6 +367,8 @@ export interface CreateTaskInput {
   title: string;
   prompt: string;
   contextPaths?: string[];
+  /** Glob/path patterns this task is allowed to touch (enables same-branch parallelism). */
+  scopePaths?: string[];
   /** Prompt image attachments (local execution only — read by the agent's Read tool). */
   images?: TaskImageInput[];
   branch?: string; // default: project.baseBranch (multi-repo: the default applied to all repos)
@@ -443,3 +454,32 @@ export interface ApiError {
   /** Optional machine-readable code, e.g. 'invalid_transition', 'not_found'. */
   code?: string;
 }
+
+// ── Quick task create (Cmd+K) ──────────────────────────────────────────────
+
+/** One answer to a clarifying question, keyed by the question's id. */
+export interface QuickCreateAnswer {
+  id: string;
+  answer: string;
+}
+
+/** Request payload for POST /api/tasks/quick-create. */
+export interface QuickCreateInput {
+  /** The user's raw natural-language task text. */
+  text: string;
+  /** Answers to a prior round of clarifying questions, if any. */
+  answers?: QuickCreateAnswer[];
+}
+
+/** A clarifying question the parser asks when it cannot resolve the task. */
+export interface QuickCreateQuestion {
+  id: string;
+  question: string;
+  /** Suggested answers; the UI also offers a free-text "Other". */
+  options: string[];
+}
+
+/** Response from POST /api/tasks/quick-create. */
+export type QuickCreateResponse =
+  | { status: "created"; task: Task }
+  | { status: "needs_input"; questions: QuickCreateQuestion[] };

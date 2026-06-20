@@ -29,6 +29,7 @@ interface TaskRow {
   title: string;
   prompt: string;
   context_paths: string;
+  scope_paths: string;
   branch: string;
   repo_branches: string | null;
   workspace_mode: Task["workspaceMode"];
@@ -64,6 +65,7 @@ function rowToTask(row: TaskRow): Task {
     title: row.title,
     prompt: row.prompt,
     contextPaths: JSON.parse(row.context_paths) as string[],
+    scopePaths: JSON.parse(row.scope_paths) as string[],
     branch: row.branch,
     repoBranches: row.repo_branches
       ? (JSON.parse(row.repo_branches) as Record<string, string>)
@@ -106,6 +108,7 @@ export type TaskUpdate = Partial<
     | "title"
     | "prompt"
     | "contextPaths"
+    | "scopePaths"
     | "branch"
     | "repoBranches"
     | "workspaceMode"
@@ -132,6 +135,7 @@ function taskToRowParams(task: Task) {
     title: task.title,
     prompt: task.prompt,
     contextPaths: JSON.stringify(task.contextPaths),
+    scopePaths: JSON.stringify(task.scopePaths),
     branch: task.branch,
     repoBranches: task.repoBranches ? JSON.stringify(task.repoBranches) : null,
     workspaceMode: task.workspaceMode,
@@ -158,6 +162,7 @@ const UPDATE_SQL = `
     title = @title,
     prompt = @prompt,
     context_paths = @contextPaths,
+    scope_paths = @scopePaths,
     branch = @branch,
     repo_branches = @repoBranches,
     workspace_mode = @workspaceMode,
@@ -187,6 +192,7 @@ export interface CreateTaskRecord {
   title: string;
   prompt: string;
   contextPaths: string[];
+  scopePaths: string[];
   branch: string;
   repoBranches?: Record<string, string>;
   workspaceMode: Task["workspaceMode"];
@@ -207,6 +213,7 @@ export function createTask(record: CreateTaskRecord): { task: Task; event: TaskE
     title: record.title,
     prompt: record.prompt,
     contextPaths: record.contextPaths,
+    scopePaths: record.scopePaths,
     branch: record.branch,
     repoBranches: record.repoBranches,
     workspaceMode: record.workspaceMode,
@@ -224,12 +231,12 @@ export function createTask(record: CreateTaskRecord): { task: Task; event: TaskE
   const insert = db.transaction(() => {
     db.prepare(
       `INSERT INTO tasks (
-         id, project_id, title, prompt, context_paths, branch, repo_branches, workspace_mode,
+         id, project_id, title, prompt, context_paths, scope_paths, branch, repo_branches, workspace_mode,
          board_column, run_state, execution, model_overrides, worktree,
          claude_session_id, codex_thread_id, remote_session_id,
          review_cycle, commit_shas, pr_url, cost_usd, error, created_at, updated_at
        ) VALUES (
-         @id, @projectId, @title, @prompt, @contextPaths, @branch, @repoBranches, @workspaceMode,
+         @id, @projectId, @title, @prompt, @contextPaths, @scopePaths, @branch, @repoBranches, @workspaceMode,
          @boardColumn, @runState, @execution, @modelOverrides, @worktree,
          @claudeSessionId, @codexThreadId, @remoteSessionId,
          @reviewCycle, @commitShas, @prUrl, @costUsd, @error, @createdAt, @updatedAt

@@ -12,8 +12,10 @@ import { listTaskAttachments } from "@/server/attachments";
 import { runClaude } from "@/server/agents/claudeRunner";
 import {
   branchExists,
+  changedFiles,
   checkoutBranch,
   commitAll,
+  commitPaths,
   createBranch,
   headSha,
   revList,
@@ -21,7 +23,9 @@ import {
   worktreeIsValid,
 } from "@/server/git";
 import { notify } from "@/server/notify";
-import { wasCanceled } from "./processRegistry";
+import { wasCanceled, wasInterrupted } from "./processRegistry";
+import { withKeyedLock } from "./mutex";
+import { matchesScope } from "./scope";
 import { requireTask, transition } from "./stateMachine";
 import { renderFindingsMarkdown, requireProject, resolveModelSpec } from "./common";
 import {
@@ -48,6 +52,36 @@ export interface ImplementOptions {
 export interface ImplementOutcome {
   ok: boolean;
   canceled?: boolean;
+  /** The live agent was interrupted by a mid-task user message; resume with it. */
+  interrupted?: boolean;
+}
+
+/** Pathspec for the keyed git lock — undefined for isolated (worktree) checkouts. */
+function branchLockKey(task: Task): string | undefined {
+  return task.workspaceMode === "worktree" ? undefined : `${task.projectId}::${task.branch}`;
+}
+
+/**
+ * Commit instruction appended to the agent prompt. Scoped tasks must NOT run
+ * git themselves — the system stages only their declared paths (so a concurrent
+ * same-branch task's disjoint edits are never swept into this task's commit).
+ */
+function commitInstruction(task: Task): string[] {
+  if (task.scopePaths.length > 0) {
+    return [
+      "",
+      "Confine your edits to this file scope (other tasks may be editing the same branch in parallel):",
+      ...task.scopePaths.map((p) => `- ${p}`),
+      "Do NOT run git add / git commit / git push — the system commits ONLY the changed files",
+      "inside your scope for you. Just make the edits, then finish with a short summary of what you changed.",
+    ];
+  }
+  return [
+    "",
+    "When you are done, commit your work with `git add -A && git commit` using a clear,",
+    "descriptive commit message (imperative mood, one summary line; body if needed).",
+    "Do NOT push and do NOT open a pull request. Finish with a short summary of what you changed.",
+  ];
 }
 
 function slugify(text: string): string {
@@ -77,28 +111,21 @@ function buildStartPrompt(task: Task): string {
       ...attachments.map((p) => `- ${p}`),
     );
   }
-  parts.push(
-    "",
-    "When you are done, commit your work with `git add -A && git commit` using a clear,",
-    "descriptive commit message (imperative mood, one summary line; body if needed).",
-    "Do NOT push and do NOT open a pull request. Finish with a short summary of what you changed.",
-  );
+  parts.push(...commitInstruction(task));
   return parts.join("\n");
 }
 
-function buildFixPrompt(feedbackMarkdown: string, humanDirective: boolean): string {
+function buildFixPrompt(task: Task, feedbackMarkdown: string, humanDirective: boolean): string {
   const intro = humanDirective
     ? [
-        "The user sent a message about this task while it was stopped. Follow their",
-        "instructions below, then commit your changes with a clear commit message",
-        "(do NOT push, do NOT open a pull request). Finish with a short summary of what you changed.",
+        "The user sent a message about this task while it was running. Follow their",
+        "instructions below, then finish.",
       ]
     : [
         "A code reviewer examined your changes for this task and requested changes.",
-        "Address each blocking item below, then commit your fixes with a clear commit message",
-        "(do NOT push, do NOT open a pull request). Finish with a short summary of what you changed.",
+        "Address each blocking item below, then finish.",
       ];
-  return [...intro, "", feedbackMarkdown.trim()].join("\n");
+  return [...intro, ...commitInstruction(task), "", feedbackMarkdown.trim()].join("\n");
 }
 
 /** Build the markdown fed into the fix round from a codex verdict. */
@@ -180,7 +207,13 @@ export async function runImplementerPhase(
   // cleanly as dev_failed below without a half-started run.
   let cwd: string;
   try {
-    const prepared = await prepareWorkspace(task);
+    // Scoped tasks can run concurrently on a shared checkout, so serialize the
+    // short workspace-prep git ops (checkout / branch create) on the branch key.
+    const lockKey = branchLockKey(task);
+    const prepared =
+      lockKey && task.scopePaths.length > 0
+        ? await withKeyedLock(lockKey, () => prepareWorkspace(task))
+        : await prepareWorkspace(task);
     task = prepared.task;
     cwd = prepared.cwd;
   } catch (err) {
@@ -218,7 +251,7 @@ export async function runImplementerPhase(
 
   const prompt =
     isFix && opts.feedbackMarkdown !== undefined
-      ? buildFixPrompt(opts.feedbackMarkdown, opts.humanDirective === true)
+      ? buildFixPrompt(task, opts.feedbackMarkdown, opts.humanDirective === true)
       : buildStartPrompt(task);
 
   const result = await runClaude({
@@ -238,6 +271,18 @@ export async function runImplementerPhase(
 
   const costDelta = result.totalCostUsd ?? 0;
 
+  if (wasInterrupted(taskId)) {
+    // A mid-task user message killed the run. This is NOT a failure: record the
+    // cost, drop runState back to idle, and let the pipeline resume the session
+    // with the queued message. Uncommitted edits stay in the tree for the
+    // resumed session to finish and commit.
+    transition(taskId, "task_interrupted", {
+      payload: { runId: result.runId },
+      update: { costUsd: task.costUsd + costDelta, error: undefined },
+    });
+    return { ok: false, interrupted: true };
+  }
+
   if (result.isError) {
     const message = result.failureReason ?? "implementer run failed";
     transition(taskId, "dev_failed", {
@@ -248,13 +293,29 @@ export async function runImplementerPhase(
     return { ok: false };
   }
 
-  // Ensure the work is committed (fallback commit if the agent forgot).
+  // Commit the work. Scoped tasks stage ONLY their in-scope changed files under
+  // the per-branch git lock (so a concurrent task's disjoint edits aren't swept
+  // in); unscoped tasks keep the original "commit everything" behaviour.
   let newShas: string[] = [];
   try {
+    const message = `friday: ${task.title}`;
     if (multi && baseShas) {
-      newShas = await commitAllRepos(repos, `friday: ${task.title}`, baseShas);
+      // Multi-repo: commit across every sub-repo (scoping not applied here).
+      newShas = await commitAllRepos(repos, message, baseShas);
+    } else if (task.scopePaths.length > 0) {
+      const lockKey = branchLockKey(task);
+      const doCommit = async (): Promise<void> => {
+        const pre = (await headSha(cwd).catch(() => undefined)) ?? baseSha;
+        const changed = await changedFiles(cwd);
+        const inScope = changed.filter((f) => matchesScope(f, task.scopePaths));
+        await commitPaths(cwd, message, inScope);
+        const post = await headSha(cwd).catch(() => undefined);
+        newShas = pre && post && post !== pre ? await revList(cwd, pre, post) : [];
+      };
+      if (lockKey) await withKeyedLock(lockKey, doCommit);
+      else await doCommit();
     } else {
-      await commitAll(cwd, `friday: ${task.title}`);
+      await commitAll(cwd, message);
       newShas = baseSha ? await revList(cwd, baseSha, "HEAD") : [];
     }
   } catch (err) {
